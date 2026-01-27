@@ -516,10 +516,18 @@ class Canvas(QWidget):
                 shape_type = "circle"; bbox = QPolygonF(self.current_points).boundingRect(); detected_path.addEllipse(bbox)
 
         if shape_type:
+            # FIX: Use specific shape type and inherit fill settings
             self.snapped_shape = {
-                "type": "pen", "color": self.active_color, "size": self.active_size,
-                "opacity": self.active_opacity, "style": self.active_style,
-                "path": detected_path, "is_preview": True, "shape_type": shape_type
+                "type": shape_type, 
+                "color": self.active_color, 
+                "size": self.active_size,
+                "opacity": self.active_opacity, 
+                "style": self.active_style,
+                "fill_enabled": state.current_fill_enabled,
+                "fill_color": state.current_fill_color,
+                "path": detected_path, 
+                "is_preview": True, 
+                "shape_type": shape_type
             }
             self.is_scaling_shape = True
             self.base_snapped_path = detected_path 
