@@ -4,9 +4,20 @@ import time
 import cv2          
 import numpy as np
 import statistics
-from PySide6.QtWidgets import QWidget, QLineEdit, QFileDialog
+from PySide6.QtWidgets import QWidget, QLineEdit, QFileDialog, QApplication
 from PySide6.QtCore import Qt, QPoint, QRect, QPointF, QRectF, QTimer
-from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QBrush, QPolygonF, QRegion, QPixmap, QFont, QFontMetrics, QKeySequence, QCursor, QTransform
+from PySide6.QtGui import (
+    QPainter, QColor, QPen, QPainterPath, QBrush, QPolygonF, QRegion, 
+    QPixmap, QFont, QFontMetrics, QKeySequence, QCursor, QTransform, 
+    QTabletEvent, QPainterPathStroker, QInputDevice
+)
+
+# Safe Import for QPointingDevice (Qt6)
+try:
+    from PySide6.QtGui import QPointingDevice
+    HAS_POINTING_DEVICE = True
+except ImportError:
+    HAS_POINTING_DEVICE = False
 
 from core.state import state
 from ui.settings_window import SettingsWindow
@@ -66,6 +77,7 @@ class Canvas(QWidget):
         self.settings_win = None
 
         self.is_internal_sync = False 
+        self.previous_tool_before_eraser = None 
 
         # --- SELECTION TRANSFORMATION ---
         self.transform_mode = None  
@@ -78,13 +90,13 @@ class Canvas(QWidget):
         self.transform_start_angle = 0.0
 
         # --- AESTHETIC CONFIG ---
-        self.theme_border = QColor("#8E24AA") 
-        self.theme_fill = QColor(142, 36, 170, 25) 
+        self.theme_border = QColor("#6c5ce7") 
+        self.theme_fill = QColor(108, 92, 231, 30) 
+        self.aesthetic_shape_color = QColor("#6c5ce7")
 
-        # --- LASER / VANISHING INK ---
-        self.laser_points = [] 
+        # --- VANISHING INK TIMER ---
         self.vanish_timer = QTimer(self)
-        self.vanish_timer.setInterval(100)
+        self.vanish_timer.setInterval(100) 
         self.vanish_timer.timeout.connect(self.check_vanishing_strokes)
         self.vanish_timer.start()
 
@@ -113,7 +125,11 @@ class Canvas(QWidget):
         state.style_changed.connect(self.set_style) 
         state.action_triggered.connect(self.handle_action)
         state.background_changed.connect(self.update_background)
+        state.fill_toggled.connect(self.update)
+        state.fill_color_changed.connect(self.update_fill_color_selection)
 
+        # Initialize Cursor
+        QApplication.setOverrideCursor(Qt.ArrowCursor)
         self.set_tool(self.active_tool)
 
     def load_cursors(self):
@@ -134,15 +150,19 @@ class Canvas(QWidget):
         self.cursors["laser"] = create_cursor("cursor_pen.png", 0, 31, Qt.CrossCursor)
 
     def apply_custom_cursor(self, tool_id):
-        if tool_id == "tool_cursor": self.setCursor(Qt.ArrowCursor)
-        elif tool_id == "tool_laser": self.setCursor(self.cursors["laser"]) 
-        elif "pen" in tool_id: self.setCursor(self.cursors["pen"])
-        elif "eraser" in tool_id: self.setCursor(self.cursors["eraser"])
-        elif "hl" in tool_id: self.setCursor(self.cursors["hl"])
-        elif "text" in tool_id: self.setCursor(self.cursors["text"])
-        elif "tool_select" in tool_id: self.setCursor(self.cursors["select"])
-        elif "tool_" in tool_id: self.setCursor(self.cursors["shape"])
-        else: self.setCursor(Qt.ArrowCursor)
+        cursor = Qt.ArrowCursor
+        if tool_id == "tool_laser": cursor = self.cursors["laser"] 
+        elif "pen" in tool_id: cursor = self.cursors["pen"]
+        elif "eraser" in tool_id: cursor = self.cursors["eraser"]
+        elif "hl" in tool_id: cursor = self.cursors["hl"]
+        elif "text" in tool_id: cursor = self.cursors["text"]
+        elif "tool_select" in tool_id: cursor = self.cursors["select"]
+        elif "tool_" in tool_id: cursor = self.cursors["shape"]
+        
+        # Use changeOverrideCursor for immediate, prioritized updates
+        QApplication.restoreOverrideCursor() 
+        QApplication.setOverrideCursor(cursor)
+        QApplication.processEvents() # Force UI refresh immediately
 
     def set_menu_ref(self, menu): self.menu_ref = menu
 
@@ -177,6 +197,13 @@ class Canvas(QWidget):
         self.redraw_buffer()
 
     def update_background(self, color): self.update()
+    
+    def update_fill_color_selection(self, color):
+        if self.selected_indices:
+            for i in self.selected_indices:
+                self.strokes[i]["fill_color"] = color
+            self.redraw_buffer()
+            self.update()
 
     def check_vanishing_strokes(self):
         if not self.strokes: return
@@ -186,11 +213,31 @@ class Canvas(QWidget):
         if len(self.strokes) < initial_count:
             self.redraw_buffer(); self.update()
 
+    # --- KEYBOARD SHORTCUTS ---
     def keyPressEvent(self, event):
-        if event.matches(QKeySequence.Undo): self.handle_action("action_undo"); event.accept()
+        key = event.key()
+        
+        # Tablet Shortcuts
+        if key == Qt.Key_B: 
+            if state.active_tool_id == "tool_pen_1": state.set_active_tool("tool_pen_2")
+            else: state.set_active_tool("tool_pen_1")
+        elif key == Qt.Key_E:
+            if "eraser" not in state.active_tool_id: state.set_active_tool("tool_eraser")
+            else: state.set_active_tool("tool_pen_1") 
+        elif key == Qt.Key_H: state.set_active_tool("tool_hl")
+        elif key == Qt.Key_L: state.set_active_tool("tool_select_lasso")
+        elif key == Qt.Key_S: 
+            if state.active_tool_id == "tool_rect": state.set_active_tool("tool_circle")
+            elif state.active_tool_id == "tool_circle": state.set_active_tool("tool_arrow")
+            else: state.set_active_tool("tool_rect")
+        elif key == Qt.Key_Space:
+            if state.active_tool_id == "tool_pan": state.set_active_tool("tool_pen_1")
+            else: state.set_active_tool("tool_pan")
+        
+        elif event.matches(QKeySequence.Undo): self.handle_action("action_undo"); event.accept()
         elif event.matches(QKeySequence.Redo): self.handle_action("action_redo"); event.accept()
         elif event.matches(QKeySequence.Save): self.save_canvas(); event.accept()
-        elif event.key() == Qt.Key_Escape:
+        elif key == Qt.Key_Escape:
             if self.active_text_widget: self.active_text_widget.deleteLater(); self.active_text_widget = None
             else: 
                 self.selected_indices = []
@@ -201,7 +248,7 @@ class Canvas(QWidget):
                 state.set_active_tool("tool_cursor")
             self.update()
             event.accept()
-        elif event.key() == Qt.Key_Delete:
+        elif key == Qt.Key_Delete:
             if self.selected_indices:
                 for idx in sorted(self.selected_indices, reverse=True): self.strokes.pop(idx)
                 self.selected_indices = []
@@ -215,9 +262,25 @@ class Canvas(QWidget):
         else: super().keyPressEvent(event)
 
     def set_tool(self, tool_id):
+        if "select" not in tool_id and "cursor" not in tool_id:
+            self.selected_indices = []
+            self.selection_path = None
+            self.edit_btn_rect = None
+            state.set_selection_active(False)
+            self.update()
+
         self.active_tool = tool_id
         if self.active_text_widget: self.active_text_widget.deleteLater(); self.active_text_widget = None
-        self.active_color = state.current_color
+        
+        shape_keywords = ["line", "arrow", "rect", "circle", "polygon", "star"]
+        is_shape = any(k in tool_id for k in shape_keywords)
+        is_selection = "select" in tool_id or "cursor" in tool_id
+        
+        if is_shape and not is_selection:
+            self.active_color = self.aesthetic_shape_color
+        else:
+            self.active_color = state.current_color
+
         if "eraser" in tool_id:
             self.active_size = state.eraser_size
         else:
@@ -225,6 +288,8 @@ class Canvas(QWidget):
         self.active_opacity = state.current_opacity
         self.active_style = state.current_style
         self.active_font_style = state.current_font_style 
+        
+        # Cursor Update
         self.apply_custom_cursor(tool_id)
         
         is_board_active = state.board_color.alpha() > 0
@@ -250,8 +315,11 @@ class Canvas(QWidget):
         if self.is_internal_sync: return 
         if self.selected_indices:
             for i in self.selected_indices:
-                self.strokes[i]["size"] = size
-                c = self.strokes[i]["color"]; c.setAlpha(opacity); self.strokes[i]["color"] = c
+                stroke = self.strokes[i]
+                stroke["size"] = size
+                c = stroke["color"]; c.setAlpha(opacity); stroke["color"] = c
+                if "points" in stroke and stroke["points"]:
+                    stroke["path"] = self.generate_variable_width_path(stroke["points"], size)
             self.redraw_buffer(); self.update()
         
     def set_style(self, style_val):
@@ -277,7 +345,11 @@ class Canvas(QWidget):
     def handle_action(self, action):
         if action == "clear_canvas": self.strokes = []; self.redo_stack = []; self.redraw_buffer(); self.update()
         elif action == "action_undo": 
-            if self.strokes: self.strokes.pop(); self.redo_stack.append(self.strokes); self.redraw_buffer(); self.update()
+            if self.strokes: 
+                stroke = self.strokes.pop()
+                self.redo_stack.append(stroke)
+                if len(self.redo_stack) > 50: self.redo_stack.pop(0) 
+                self.redraw_buffer(); self.update()
         elif action == "action_redo":
              if self.redo_stack:
                 stroke = self.redo_stack.pop(); self.strokes.append(stroke)
@@ -315,13 +387,33 @@ class Canvas(QWidget):
     def find_selected_strokes(self):
         self.selected_indices = []
         if not self.selection_path: return
+        
         for i, stroke in enumerate(self.strokes):
             if stroke["type"] == "eraser": continue
+            
             if stroke["type"] == "text":
-                txt_w = stroke.get("text_width", 100); txt_h = stroke.get("text_height", stroke["size"] + 5)
+                txt_w = stroke.get("text_width", 100)
+                txt_h = stroke.get("text_height", stroke["size"] + 5)
                 item_rect = QRectF(stroke["pos"].x(), stroke["pos"].y() - stroke["size"], txt_w, txt_h)
-            else: item_rect = stroke["path"].boundingRect()
-            if self.selection_path.contains(item_rect): self.selected_indices.append(i)
+                if self.selection_path.contains(item_rect):
+                    self.selected_indices.append(i)
+                continue
+
+            path_to_check = stroke["path"]
+            
+            st_type = stroke["type"]
+            is_filled_poly = st_type in ["pen", "highlighter", "eraser", "laser_pen"]
+            
+            if is_filled_poly:
+                if self.selection_path.contains(path_to_check):
+                    self.selected_indices.append(i)
+            else:
+                stroker = QPainterPathStroker()
+                stroker.setWidth(stroke["size"]) 
+                hit_area = stroker.createStroke(path_to_check)
+                
+                if self.selection_path.contains(hit_area):
+                    self.selected_indices.append(i)
 
     def move_selection(self, delta):
         self.selection_rect.translate(delta)
@@ -330,7 +422,10 @@ class Canvas(QWidget):
         for i in self.selected_indices:
             stroke = self.strokes[i]
             if stroke["type"] == "text": stroke["pos"] += delta
-            else: stroke["path"].translate(delta)
+            else:
+                stroke["path"].translate(delta)
+                if "points" in stroke and stroke["points"]:
+                    stroke["points"] = [(p[0] + delta, p[1]) for p in stroke["points"]]
 
     def get_handles(self):
         r = self.selection_rect
@@ -432,337 +527,383 @@ class Canvas(QWidget):
             if shape_type == "line": self.shape_center = start 
             
             curr_pos = self.current_points[-1]
-            # Calculate Initial Radius
             self.scale_start_dist = math.hypot(curr_pos.x() - self.shape_center.x(), curr_pos.y() - self.shape_center.y())
             if self.scale_start_dist < 1: self.scale_start_dist = 1
             
-            # Calculate Initial Angle (for rotation check)
             start_vec = curr_pos - self.shape_center
             self.snap_start_angle = math.atan2(start_vec.y(), start_vec.x())
             
             self.update()
 
+    # --- VARIABLE WIDTH GENERATOR ---
+    def generate_variable_width_path(self, points, base_size):
+        if not points or len(points) < 2:
+            path = QPainterPath()
+            if points:
+                pt, press = points[0]
+                rad = max(1.0, (base_size * press) / 2)
+                path.addEllipse(pt, rad, rad)
+            return path
+
+        left_pts = []
+        right_pts = []
+
+        for i in range(len(points) - 1):
+            p1, press1 = points[i]
+            p2, press2 = points[i+1]
+            
+            dx = p2.x() - p1.x()
+            dy = p2.y() - p1.y()
+            length = math.hypot(dx, dy)
+            if length == 0: continue
+            
+            nx = -dy / length
+            ny = dx / length
+            
+            w1 = max(1.0, base_size * press1)
+            offset_x = nx * w1 * 0.5
+            offset_y = ny * w1 * 0.5
+            
+            left_pts.append(QPointF(p1.x() + offset_x, p1.y() + offset_y))
+            right_pts.append(QPointF(p1.x() - offset_x, p1.y() - offset_y))
+            
+            if i == len(points) - 2:
+                w2 = max(1.0, base_size * press2)
+                off2_x = nx * w2 * 0.5
+                off2_y = ny * w2 * 0.5
+                left_pts.append(QPointF(p2.x() + off2_x, p2.y() + off2_y))
+                right_pts.append(QPointF(p2.x() - off2_x, p2.y() - off2_y))
+
+        path = QPainterPath()
+        if left_pts:
+            path.moveTo(left_pts[0])
+            for p in left_pts[1:]:
+                path.lineTo(p)
+            for p in reversed(right_pts):
+                path.lineTo(p)
+            path.closeSubpath()
+        
+        path.setFillRule(Qt.WindingFill)
+        
+        return path
+
+    def tabletEvent(self, event: QTabletEvent):
+        # [FIX] Safer logic to prevent crashes if QPointingDevice is missing/different
+        try:
+            if HAS_POINTING_DEVICE:
+                pt = event.pointerType()
+                if pt == QPointingDevice.PointerType.Eraser:
+                    if "eraser" not in self.active_tool:
+                        self.previous_tool_before_eraser = self.active_tool
+                        state.set_active_tool("tool_eraser")
+                elif pt == QPointingDevice.PointerType.Pen:
+                    if self.previous_tool_before_eraser:
+                        state.set_active_tool(self.previous_tool_before_eraser)
+                        self.previous_tool_before_eraser = None
+        except Exception:
+            pass # Gracefully ignore tablet feature failures
+
+        # [FIX] Simplified extraction and force-start drawing
+        pos = event.position()
+        pressure = event.pressure()
+        if pressure == 0.0: pressure = 1.0 # Fallback for some drivers
+
+        # If a tablet button is pressed (or tip is down), treat as click
+        btns = event.buttons()
+        
+        if event.type() == QTabletEvent.TabletPress:
+            # Force Left Button if the driver sends NoButton on press
+            if btns == Qt.NoButton: btns = Qt.LeftButton
+            self._handle_input(pos, pressure, "press", btns)
+            event.accept()
+        elif event.type() == QTabletEvent.TabletMove:
+            self._handle_input(pos, pressure, "move", btns)
+            event.accept()
+        elif event.type() == QTabletEvent.TabletRelease:
+            self._handle_input(pos, pressure, "release", btns)
+            event.accept()
+
     def mousePressEvent(self, event):
-        if event.button() == Qt.RightButton:
-            context = "selection_context" if self.selected_indices else "root"
-            state.request_menu_context.emit(context)
-            return
-
-        if event.button() == Qt.LeftButton:
-            # Check Handles First
-            if self.selected_indices:
-                handles = self.get_handles()
-                for key, rect in handles.items():
-                    if rect.contains(event.position()):
-                        self.transform_mode = "rotate" if key == "rot" else "scale"
-                        self.active_handle = key
-                        self.move_start_pos = event.position()
-                        self.original_selection_rect = QRectF(self.selection_rect)
-                        # Prepare math data for rotation
-                        self.transform_center = self.selection_rect.center()
-                        mouse_vec = event.position() - self.transform_center
-                        self.transform_start_angle = math.atan2(mouse_vec.y(), mouse_vec.x())
-                        
-                        # Deep copy for non-destructive
-                        self.original_selected_strokes = [self.strokes[i].copy() for i in self.selected_indices]
-                        for k, stroke in enumerate(self.original_selected_strokes):
-                            if stroke["type"] != "text": stroke["path"] = QPainterPath(self.strokes[self.selected_indices[k]]["path"])
-                        return
-
-            if self.edit_btn_rect and self.edit_btn_rect.contains(event.position()):
-                state.request_menu_context.emit("selection_context"); return
-
-            if self.menu_ref and self.menu_ref.geometry().contains(event.globalPosition().toPoint()): return 
-            if self.active_tool == "tool_text":
-                if self.active_text_widget: self.active_text_widget.deleteLater(); self.active_text_widget = None
-                else: self.spawn_text_input(event.position().toPoint())
-                return
-            
-            self.is_drawing = True
-            self.last_pos = event.position()
-            self.current_pos = self.last_pos
-            self.start_pos = self.last_pos.toPoint()
-            self.redo_stack = []
-            
-            self.current_points = [self.last_pos]
-            self.snapped_shape = None
-            self.is_scaling_shape = False
-            self.shape_hold_timer.stop()
-
-            if "select" in self.active_tool:
-                # Check move
-                if self.selected_indices and self.selection_rect.contains(self.last_pos):
-                    self.is_moving_selection = True; self.move_start_pos = self.last_pos; return
-                
-                self.selected_indices = []; self.selection_path = None; self.edit_btn_rect = None 
-                state.set_selection_active(False)
-                
-                if self.active_tool == "tool_select_lasso": self.selection_path = QPainterPath(); self.selection_path.moveTo(self.last_pos)
-                else: self.selection_path = QPainterPath() 
-                
-                self.update(); return
-
-            if "eraser" in self.active_tool and state.eraser_type == "stroke":
-                if self.delete_stroke_at(self.current_pos.toPoint()): self.redraw_buffer(); self.update()
-                return
-
-            self.current_stroke = {
-                "type": self.get_stroke_type(), "color": QColor(self.active_color),
-                "size": self.active_size, "style": self.active_style,
-                "path": QPainterPath(), "start": self.start_pos, "end": self.start_pos
-            }
-            if self.current_stroke["type"] in ["pen", "highlighter", "eraser", "laser_pen"]: self.current_stroke["path"].moveTo(self.last_pos)
+        self._handle_input(event.position(), 1.0, "press", event.button())
 
     def mouseMoveEvent(self, event):
-        pos = event.position()
-        
-        # 1. Transform Handles (Scale/Rotate)
-        if self.transform_mode:
-            if self.transform_mode == "scale":
-                # Get Anchor and Distances
-                anchor = self.get_anchor_point(self.active_handle)
-                orig_vector = self.move_start_pos - anchor
-                curr_vector = pos - anchor
-                
-                # Avoid division by zero
-                sx = 1.0; sy = 1.0
-                if abs(orig_vector.x()) > 1: sx = curr_vector.x() / orig_vector.x()
-                if abs(orig_vector.y()) > 1: sy = curr_vector.y() / orig_vector.y()
-                
-                # Apply Transform
-                transform = QTransform()
-                transform.translate(anchor.x(), anchor.y())
-                transform.scale(sx, sy)
-                transform.translate(-anchor.x(), -anchor.y())
-                
-                # Update Strokes
-                united_rect = QRectF()
-                first = True
-                
-                for idx, orig_stroke in enumerate(self.original_selected_strokes):
-                    real_idx = self.selected_indices[idx]
-                    if orig_stroke["type"] == "text":
-                        new_pos = transform.map(orig_stroke["pos"])
-                        self.strokes[real_idx]["pos"] = new_pos
-                        # Approximate rect for text
-                        item_rect = QRectF(new_pos.x(), new_pos.y() - orig_stroke["size"], orig_stroke.get("text_width", 10), orig_stroke.get("text_height", 10))
-                    else:
-                        self.strokes[real_idx]["path"] = transform.map(orig_stroke["path"])
-                        item_rect = self.strokes[real_idx]["path"].boundingRect()
-                    
-                    if first: united_rect = item_rect; first = False
-                    else: united_rect = united_rect.united(item_rect)
-                
-                self.selection_rect = united_rect.adjusted(-10, -10, 10, 10)
-                self.selection_path = QPainterPath()
-                self.selection_path.addRect(self.selection_rect)
-                self.redraw_buffer(); self.update()
-                
-            elif self.transform_mode == "rotate":
-                center = self.transform_center
-                mouse_vec = pos - center
-                curr_angle = math.atan2(mouse_vec.y(), mouse_vec.x())
-                delta_angle_rad = curr_angle - self.transform_start_angle
-                delta_angle_deg = math.degrees(delta_angle_rad)
-                
-                transform = QTransform()
-                transform.translate(center.x(), center.y())
-                transform.rotate(delta_angle_deg)
-                transform.translate(-center.x(), -center.y())
-                
-                united_rect = QRectF(); first = True
-                
-                for idx, orig_stroke in enumerate(self.original_selected_strokes):
-                    real_idx = self.selected_indices[idx]
-                    if orig_stroke["type"] == "text":
-                        new_pos = transform.map(orig_stroke["pos"])
-                        self.strokes[real_idx]["pos"] = new_pos
-                        item_rect = QRectF(new_pos.x(), new_pos.y() - orig_stroke["size"], orig_stroke.get("text_width", 10), orig_stroke.get("text_height", 10))
-                    else:
-                        self.strokes[real_idx]["path"] = transform.map(orig_stroke["path"])
-                        item_rect = self.strokes[real_idx]["path"].boundingRect()
-                        
-                    if first: united_rect = item_rect; first = False
-                    else: united_rect = united_rect.united(item_rect)
-                
-                self.selection_rect = united_rect.adjusted(-10, -10, 10, 10)
-                self.selection_path = QPainterPath()
-                self.selection_path.addRect(self.selection_rect)
-                self.redraw_buffer(); self.update()
-                
-            return
-
-        # 2. Scaling & Rotating Shape (Magic Shape Hold)
-        if self.is_scaling_shape and self.snapped_shape:
-            if self.snapped_shape["shape_type"] == "line":
-                path = QPainterPath(); path.moveTo(self.current_points[0]); path.lineTo(pos); self.snapped_shape["path"] = path
-            else:
-                # Calculate Scale (Distance)
-                current_dist = math.hypot(pos.x() - self.shape_center.x(), pos.y() - self.shape_center.y())
-                scale_factor = current_dist / self.scale_start_dist
-                
-                # Calculate Rotation (Angle difference)
-                curr_vec = pos - self.shape_center
-                curr_angle = math.atan2(curr_vec.y(), curr_vec.x())
-                delta_angle_deg = math.degrees(curr_angle - self.snap_start_angle)
-                
-                transform = QTransform()
-                transform.translate(self.shape_center.x(), self.shape_center.y())
-                transform.rotate(delta_angle_deg)
-                transform.scale(scale_factor, scale_factor)
-                transform.translate(-self.shape_center.x(), -self.shape_center.y())
-                
-                self.snapped_shape["path"] = transform.map(self.base_snapped_path)
-            
-            self.update(); return 
-
-        # 3. Update Laser Tail (if active)
-        if self.active_tool == "tool_laser":
-            self.laser_points.append(pos); self.update()
-            # Falls through to drawing logic below so we also get the stroke recorded
-
-        # 4. Handle Cursors for Selection
-        if self.selected_indices and not self.is_drawing:
-            handles = self.get_handles()
-            h_cursor = Qt.ArrowCursor
-            if handles["tl"].contains(pos) or handles["br"].contains(pos): h_cursor = Qt.SizeFDiagCursor
-            elif handles["tr"].contains(pos) or handles["bl"].contains(pos): h_cursor = Qt.SizeBDiagCursor
-            elif handles["tm"].contains(pos) or handles["bm"].contains(pos): h_cursor = Qt.SizeVerCursor
-            elif handles["lm"].contains(pos) or handles["rm"].contains(pos): h_cursor = Qt.SizeHorCursor
-            elif handles["rot"].contains(pos): h_cursor = Qt.PointingHandCursor
-            if self.cursor().shape() != h_cursor: self.setCursor(h_cursor)
-
-        # 5. Main Drawing Logic
-        if self.is_drawing:
-            # Check Magic Shape Timer (only if Pen)
-            if "pen" in self.active_tool:
-                dist = (pos - self.last_pos).manhattanLength()
-                if dist > 2.0:
-                    self.shape_hold_timer.start(); self.current_points.append(pos)
-                    if self.snapped_shape and dist > 10: self.snapped_shape = None; self.is_scaling_shape = False; self.update()
-
-            if (pos - self.last_pos).manhattanLength() < 2.0: return
-            
-            if "select" in self.active_tool:
-                if self.is_moving_selection:
-                    delta = pos - self.move_start_pos; self.move_selection(delta); self.move_start_pos = pos; self.redraw_buffer()
-                else:
-                    if self.active_tool == "tool_select_rect": 
-                        self.selection_path = QPainterPath(); self.selection_path.addRect(QRectF(self.start_pos, pos).normalized())
-                    elif self.active_tool == "tool_select_lasso": self.selection_path.lineTo(pos)
-                self.update(); return
-            
-            if "eraser" in self.active_tool and state.eraser_type == "stroke":
-                if self.delete_stroke_at(pos.toPoint()): self.redraw_buffer(); self.update()
-                return
-            
-            if self.current_stroke:
-                st_type = self.current_stroke["type"]
-                if st_type in ["pen", "highlighter", "eraser", "laser_pen"]:
-                    mid_x = (self.last_pos.x() + pos.x()) / 2; mid_y = (self.last_pos.y() + pos.y()) / 2
-                    self.current_stroke["path"].quadTo(self.last_pos, QPointF(mid_x, mid_y)); self.last_pos = pos
-                else: self.current_stroke["end"] = pos.toPoint()
-                self.update()
+        self._handle_input(event.position(), 1.0, "move", event.buttons())
 
     def mouseReleaseEvent(self, event):
-        self.shape_hold_timer.stop()
-        self.is_scaling_shape = False 
-        self.transform_mode = None
-        self.active_handle = None
+        self._handle_input(event.position(), 1.0, "release", event.button())
+
+    def _handle_input(self, posF, pressure, event_type, buttons):
+        pos = posF
         
-        if event.button() == Qt.LeftButton and self.is_drawing:
-            self.is_drawing = False
-            if "select" in self.active_tool:
-                if self.is_moving_selection:
-                    self.is_moving_selection = False
-                    if self.active_tool == "tool_select_lasso": self.selection_path.closeSubpath()
-                else:
-                    if self.active_tool == "tool_select_lasso": self.selection_path.closeSubpath()
-                    self.find_selected_strokes()
-                    if not self.selected_indices:
-                        self.selection_path = None
-                        self.edit_btn_rect = None
-                        self.selection_rect = QRectF()
-                        state.set_selection_active(False)
-                    else:
-                        self.is_internal_sync = True
-                        state.set_selection_active(True)
-                        last_stroke = self.strokes[self.selected_indices[-1]]
-                        s_col = last_stroke.get("color", QColor("black"))
-                        s_size = last_stroke.get("size", 2)
-                        s_style = last_stroke.get("style", Qt.SolidLine)
-                        state.sync_tool_properties(color=s_col, thickness=s_size, style=s_style)
-                        self.is_internal_sync = False
+        # Pressure Curve
+        pressure = math.pow(pressure, 1.4) 
 
-                        united_rect = QRectF(); first = True
-                        for i in self.selected_indices:
-                            stroke = self.strokes[i]
-                            if stroke["type"] == "text":
-                                txt_w = stroke.get("text_width", 100); txt_h = stroke.get("text_height", stroke["size"] + 5)
-                                item_rect = QRectF(stroke["pos"].x(), stroke["pos"].y() - stroke["size"], txt_w, txt_h)
-                            else: item_rect = stroke["path"].boundingRect()
-                            if first: united_rect = item_rect; first = False
-                            else: united_rect = united_rect.united(item_rect)
-                        
-                        self.selection_rect = united_rect.adjusted(-10, -10, 10, 10)
-                        self.selection_path = QPainterPath()
-                        self.selection_path.addRect(self.selection_rect)
-                        
-                        rect = self.selection_rect
-                        btn_size = 28
-                        self.edit_btn_rect = QRectF(rect.right() - btn_size/2, rect.top() - btn_size/2, btn_size, btn_size)
-                self.update(); return
+        if event_type == "press":
+            if buttons == Qt.RightButton:
+                context = "selection_context" if self.selected_indices else "root"
+                state.request_menu_context.emit(context)
+                return
 
-            if self.current_stroke:
-                final_stroke = self.current_stroke
-                if self.snapped_shape:
-                    final_stroke = self.snapped_shape; self.snapped_shape = None 
-                else:
-                    if self.current_stroke["type"] in ["pen", "highlighter", "eraser", "laser_pen"]: self.current_stroke["path"].lineTo(self.last_pos)
-                    else:
-                        path = QPainterPath()
-                        self.generate_shape_path(path, self.current_stroke["type"], self.current_stroke["start"], self.current_stroke["end"])
-                        self.current_stroke["path"] = path
+            # [FIX] Robust Left Click check (some tablets send NoButton on tip press)
+            if buttons == Qt.LeftButton or buttons == Qt.NoButton:
+                if self.selected_indices and ("select" in self.active_tool or "cursor" in self.active_tool):
+                    handles = self.get_handles()
+                    for key, rect in handles.items():
+                        if rect.contains(pos):
+                            self.transform_mode = "rotate" if key == "rot" else "scale"
+                            self.active_handle = key
+                            self.move_start_pos = pos
+                            self.original_selection_rect = QRectF(self.selection_rect)
+                            self.transform_center = self.selection_rect.center()
+                            mouse_vec = pos - self.transform_center
+                            self.transform_start_angle = math.atan2(mouse_vec.y(), mouse_vec.x())
+                            self.original_selected_strokes = [self.strokes[i].copy() for i in self.selected_indices]
+                            for k, stroke in enumerate(self.original_selected_strokes):
+                                if stroke["type"] != "text": stroke["path"] = QPainterPath(self.strokes[self.selected_indices[k]]["path"])
+                            return
+
+                if self.edit_btn_rect and self.edit_btn_rect.contains(pos):
+                    state.request_menu_context.emit("selection_context"); return
+
+                if self.menu_ref and self.menu_ref.geometry().contains(pos.toPoint()): return 
+                if self.active_tool == "tool_text":
+                    if self.active_text_widget: self.active_text_widget.deleteLater(); self.active_text_widget = None
+                    else: self.spawn_text_input(pos.toPoint())
+                    return
                 
-                if final_stroke["type"] == "laser_pen": final_stroke["vanish_deadline"] = time.time() + state.laser_duration
-                self.strokes.append(final_stroke)
-                painter = QPainter(self.buffer_pixmap); painter.setRenderHint(QPainter.Antialiasing)
-                self.draw_stroke_entity(painter, final_stroke); painter.end()
-                self.current_stroke = None; self.update()
+                self.is_drawing = True
+                self.last_pos = pos
+                self.current_pos = self.last_pos
+                self.start_pos = self.last_pos.toPoint()
+                self.redo_stack = []
+                self.current_points = [self.last_pos] 
+                self.snapped_shape = None
+                self.is_scaling_shape = False
+                self.shape_hold_timer.stop()
+
+                if "select" in self.active_tool:
+                    if self.selected_indices and self.selection_rect.contains(self.last_pos):
+                        self.is_moving_selection = True; self.move_start_pos = self.last_pos; return
+                    self.selected_indices = []; self.selection_path = None; self.edit_btn_rect = None 
+                    state.set_selection_active(False)
+                    if self.active_tool == "tool_select_lasso": self.selection_path = QPainterPath(); self.selection_path.moveTo(self.last_pos)
+                    else: self.selection_path = QPainterPath() 
+                    self.update(); return
+
+                if "eraser" in self.active_tool and state.eraser_type == "stroke":
+                    if self.delete_stroke_at(self.current_pos.toPoint()): self.redraw_buffer(); self.update()
+                    return
+
+                self.current_stroke = {
+                    "type": self.get_stroke_type(), "color": QColor(self.active_color),
+                    "size": self.active_size, "style": self.active_style,
+                    "fill_enabled": state.current_fill_enabled,
+                    "fill_color": QColor(state.current_fill_color),
+                    "path": QPainterPath(), "start": self.start_pos, "end": self.start_pos,
+                    "points": [] 
+                }
+                
+                if self.current_stroke["type"] in ["pen", "highlighter", "eraser", "laser_pen"]:
+                    self.current_stroke["points"].append((pos, pressure))
+                    rad = max(1.0, (self.active_size * pressure) / 2)
+                    self.current_stroke["path"].addEllipse(pos, rad, rad)
+                else:
+                    self.current_stroke["path"].moveTo(self.last_pos)
+
+        elif event_type == "move":
+            if self.transform_mode:
+                transform = QTransform()
+                
+                if self.transform_mode == "scale":
+                    anchor = self.get_anchor_point(self.active_handle)
+                    orig_vector = self.move_start_pos - anchor
+                    curr_vector = pos - anchor
+                    sx = 1.0; sy = 1.0
+                    if abs(orig_vector.x()) > 1: sx = curr_vector.x() / orig_vector.x()
+                    if abs(orig_vector.y()) > 1: sy = curr_vector.y() / orig_vector.y()
+                    
+                    if self.active_handle in ["tm", "bm"]: sx = 1.0
+                    if self.active_handle in ["lm", "rm"]: sy = 1.0
+                    
+                    transform.translate(anchor.x(), anchor.y())
+                    transform.scale(sx, sy)
+                    transform.translate(-anchor.x(), -anchor.y())
+                elif self.transform_mode == "rotate":
+                    center = self.transform_center
+                    mouse_vec = pos - center
+                    curr_angle = math.atan2(mouse_vec.y(), mouse_vec.x())
+                    delta_angle_rad = curr_angle - self.transform_start_angle
+                    delta_angle_deg = math.degrees(delta_angle_rad)
+                    transform.translate(center.x(), center.y())
+                    transform.rotate(delta_angle_deg)
+                    transform.translate(-center.x(), -center.y())
+
+                united_rect = QRectF(); first = True
+                for idx, orig_stroke in enumerate(self.original_selected_strokes):
+                    real_idx = self.selected_indices[idx]
+                    
+                    if orig_stroke["type"] == "text":
+                        new_pos = transform.map(orig_stroke["pos"])
+                        self.strokes[real_idx]["pos"] = new_pos
+                        if self.transform_mode == "scale":
+                            scale_avg = (abs(sx) + abs(sy)) / 2
+                            new_size = max(5, int(orig_stroke["size"] * scale_avg))
+                            self.strokes[real_idx]["size"] = new_size
+                        
+                        item_rect = QRectF(new_pos.x(), new_pos.y() - self.strokes[real_idx]["size"], 
+                                         orig_stroke.get("text_width", 10), orig_stroke.get("text_height", 10))
+                    else:
+                        self.strokes[real_idx]["path"] = transform.map(orig_stroke["path"])
+                        if "points" in orig_stroke and orig_stroke["points"]:
+                            new_points = []
+                            for pt, press in orig_stroke["points"]:
+                                new_points.append((transform.map(pt), press))
+                            self.strokes[real_idx]["points"] = new_points
+                        
+                        item_rect = self.strokes[real_idx]["path"].boundingRect()
+                        
+                    if first: united_rect = item_rect; first = False
+                    else: united_rect = united_rect.united(item_rect)
+                
+                self.selection_rect = united_rect.adjusted(-10, -10, 10, 10)
+                self.selection_path = QPainterPath(); self.selection_path.addRect(self.selection_rect)
+                self.redraw_buffer(); self.update()
+                return
+
+            if self.is_scaling_shape and self.snapped_shape:
+                if self.snapped_shape["shape_type"] == "line":
+                    path = QPainterPath(); path.moveTo(self.current_points[0]); path.lineTo(pos); self.snapped_shape["path"] = path
+                else:
+                    current_dist = math.hypot(pos.x() - self.shape_center.x(), pos.y() - self.shape_center.y())
+                    scale_factor = current_dist / self.scale_start_dist
+                    curr_vec = pos - self.shape_center
+                    curr_angle = math.atan2(curr_vec.y(), curr_vec.x())
+                    delta_angle_deg = math.degrees(curr_angle - self.snap_start_angle)
+                    transform = QTransform()
+                    transform.translate(self.shape_center.x(), self.shape_center.y())
+                    transform.rotate(delta_angle_deg)
+                    transform.scale(scale_factor, scale_factor)
+                    transform.translate(-self.shape_center.x(), -self.shape_center.y())
+                    self.snapped_shape["path"] = transform.map(self.base_snapped_path)
+                self.update(); return 
+
+            if self.selected_indices and not self.is_drawing and ("select" in self.active_tool or "cursor" in self.active_tool):
+                handles = self.get_handles()
+                h_cursor = Qt.ArrowCursor
+                if handles["tl"].contains(pos) or handles["br"].contains(pos): h_cursor = Qt.SizeFDiagCursor
+                elif handles["tr"].contains(pos) or handles["bl"].contains(pos): h_cursor = Qt.SizeBDiagCursor
+                elif handles["tm"].contains(pos) or handles["bm"].contains(pos): h_cursor = Qt.SizeVerCursor
+                elif handles["lm"].contains(pos) or handles["rm"].contains(pos): h_cursor = Qt.SizeHorCursor
+                elif handles["rot"].contains(pos): h_cursor = Qt.PointingHandCursor
+                
+                if QApplication.overrideCursor() is not None:
+                    if QApplication.overrideCursor().shape() != h_cursor:
+                        QApplication.changeOverrideCursor(h_cursor)
+                else:
+                    self.setCursor(h_cursor)
+
+            if self.is_drawing:
+                if "pen" in self.active_tool:
+                    dist = (pos - self.last_pos).manhattanLength()
+                    if dist > 2.0:
+                        self.shape_hold_timer.start(); self.current_points.append(pos)
+                        if self.snapped_shape and dist > 10: self.snapped_shape = None; self.is_scaling_shape = False; self.update()
+
+                if (pos - self.last_pos).manhattanLength() < 2.0: return
+                
+                if "select" in self.active_tool:
+                    if self.is_moving_selection:
+                        delta = pos - self.move_start_pos; self.move_selection(delta); self.move_start_pos = pos; self.redraw_buffer()
+                    else:
+                        if self.active_tool == "tool_select_rect": 
+                            self.selection_path = QPainterPath(); self.selection_path.addRect(QRectF(self.start_pos, pos).normalized())
+                        elif self.active_tool == "tool_select_lasso": self.selection_path.lineTo(pos)
+                    self.update(); return
+                
+                if "eraser" in self.active_tool and state.eraser_type == "stroke":
+                    if self.delete_stroke_at(pos.toPoint()): self.redraw_buffer(); self.update()
+                    return
+                
+                if self.current_stroke:
+                    st_type = self.current_stroke["type"]
+                    if st_type in ["pen", "highlighter", "eraser", "laser_pen"]:
+                        self.current_stroke["points"].append((pos, pressure))
+                        self.current_stroke["path"] = self.generate_variable_width_path(self.current_stroke["points"], self.active_size)
+                        self.last_pos = pos
+                    else: 
+                        self.current_stroke["end"] = pos.toPoint()
+                    self.update()
+
+        elif event_type == "release":
+            self.shape_hold_timer.stop()
+            self.is_scaling_shape = False 
+            self.transform_mode = None
+            self.active_handle = None
+            
+            if self.is_drawing:
+                self.is_drawing = False
+                if "select" in self.active_tool:
+                    if self.is_moving_selection:
+                        self.is_moving_selection = False
+                        if self.active_tool == "tool_select_lasso": self.selection_path.closeSubpath()
+                    else:
+                        if self.active_tool == "tool_select_lasso": self.selection_path.closeSubpath()
+                        self.find_selected_strokes()
+                        if not self.selected_indices:
+                            self.selection_path = None; self.edit_btn_rect = None; self.selection_rect = QRectF(); state.set_selection_active(False)
+                        else:
+                            self.is_internal_sync = True; state.set_selection_active(True)
+                            last_stroke = self.strokes[self.selected_indices[-1]]
+                            s_col = last_stroke.get("color", QColor("black"))
+                            s_size = last_stroke.get("size", 2)
+                            s_style = last_stroke.get("style", Qt.SolidLine)
+                            s_fill = last_stroke.get("fill_enabled", False)
+                            s_fill_col = last_stroke.get("fill_color", state.current_fill_color)
+                            state.sync_tool_properties(color=s_col, thickness=s_size, style=s_style, is_filled=s_fill, fill_color=s_fill_col)
+                            self.is_internal_sync = False
+                            united_rect = QRectF(); first = True
+                            for i in self.selected_indices:
+                                stroke = self.strokes[i]
+                                if stroke["type"] == "text":
+                                    txt_w = stroke.get("text_width", 100); txt_h = stroke.get("text_height", stroke["size"] + 5)
+                                    item_rect = QRectF(stroke["pos"].x(), stroke["pos"].y() - stroke["size"], txt_w, txt_h)
+                                else: item_rect = stroke["path"].boundingRect()
+                                if first: united_rect = item_rect; first = False
+                                else: united_rect = united_rect.united(item_rect)
+                            self.selection_rect = united_rect.adjusted(-10, -10, 10, 10)
+                            self.selection_path = QPainterPath(); self.selection_path.addRect(self.selection_rect)
+                            rect = self.selection_rect
+                            btn_size = 28
+                            self.edit_btn_rect = QRectF(rect.right() - btn_size/2, rect.top() - btn_size/2, btn_size, btn_size)
+                    self.update(); return
+
+                if self.current_stroke:
+                    final_stroke = self.current_stroke
+                    if self.snapped_shape:
+                        final_stroke = self.snapped_shape; self.snapped_shape = None 
+                    else:
+                        if final_stroke["type"] in ["pen", "highlighter", "eraser", "laser_pen"]:
+                            final_stroke["path"] = self.generate_variable_width_path(final_stroke["points"], self.active_size)
+                        else:
+                            path = QPainterPath()
+                            self.generate_shape_path(path, final_stroke["type"], final_stroke["start"], final_stroke["end"])
+                            final_stroke["path"] = path
+                    
+                    if final_stroke["type"] == "laser_pen": 
+                        final_stroke["vanish_deadline"] = time.time() + state.laser_duration
+
+                    self.strokes.append(final_stroke)
+                    painter = QPainter(self.buffer_pixmap); painter.setRenderHint(QPainter.Antialiasing)
+                    self.draw_stroke_entity(painter, final_stroke); painter.end()
+                    self.current_stroke = None; self.update()
 
     def draw_selection_overlay(self, painter):
         if not self.selected_indices: return
-        # AESTHETIC CHANGE: Modern Violet
         pen = QPen(self.theme_border, 2, Qt.SolidLine)
         painter.setPen(pen); painter.setBrush(self.theme_fill)
         painter.drawRect(self.selection_rect)
         
         handles = self.get_handles()
-        # Handle Border Color matches Theme
-        painter.setPen(QPen(self.theme_border, 1)); painter.setBrush(Qt.white)
-        for key, rect in handles.items():
-            if key == "rot":
-                painter.drawLine(rect.center(), QPointF(rect.center().x(), self.selection_rect.top()))
-                painter.drawEllipse(rect)
-            else: painter.drawRect(rect)
-
-        if self.edit_btn_rect:
-            painter.setBrush(self.theme_border); painter.setPen(QPen(Qt.white, 2))
-            painter.drawEllipse(self.edit_btn_rect)
-            icon_path = os.path.join("assets", "edit.png")
-            if os.path.exists(icon_path):
-                pix = QPixmap(icon_path).scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                icon_rect = QRectF(self.edit_btn_rect.center().x()-8, self.edit_btn_rect.center().y()-8, 16, 16)
-                painter.drawPixmap(icon_rect.toRect(), pix)
-    def draw_selection_overlay(self, painter):
-        if not self.selected_indices: return
-        # AESTHETIC CHANGE: Modern Violet
-        pen = QPen(self.theme_border, 2, Qt.SolidLine)
-        painter.setPen(pen); painter.setBrush(self.theme_fill)
-        painter.drawRect(self.selection_rect)
-        
-        handles = self.get_handles()
-        # Handle Border Color matches Theme
         painter.setPen(QPen(self.theme_border, 1)); painter.setBrush(Qt.white)
         for key, rect in handles.items():
             if key == "rot":
@@ -790,29 +931,75 @@ class Canvas(QWidget):
             painter.setFont(font)
             painter.drawText(stroke["pos"] + QPoint(4, stroke["size"] + 5), stroke["text"])
             return
+        
         path = stroke["path"]
         
         if st_type == "laser_pen":
             glow_color = QColor(stroke["color"])
             glow_color.setAlpha(120) 
-            glow_pen = QPen(glow_color, stroke["size"] + 8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-            painter.setPen(glow_pen)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(glow_color)
             painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-            painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
-            core_pen = QPen(Qt.white, max(1, stroke["size"] - 2), Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-            painter.setPen(core_pen)
-            painter.drawPath(path)
+            
+            if "points" in stroke and stroke["points"]:
+                core_size = max(1.0, stroke["size"] * 0.3)
+                core_path = self.generate_variable_width_path(stroke["points"], core_size)
+                painter.setBrush(Qt.white)
+                painter.drawPath(core_path)
             return
 
-        pen = QPen(stroke["color"], stroke["size"], stroke["style"], Qt.RoundCap, Qt.RoundJoin)
-        if st_type == "highlighter":
-            pen.setColor(QColor(stroke["color"].red(), stroke["color"].green(), stroke["color"].blue(), 80))
-            pen.setWidth(stroke["size"] + 10); painter.setCompositionMode(QPainter.CompositionMode_Multiply) 
-        elif st_type == "eraser":
-            painter.setCompositionMode(QPainter.CompositionMode_Clear); pen.setColor(Qt.transparent); pen.setWidth(stroke["size"])
-        else: painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-        painter.setPen(pen); painter.setBrush(Qt.NoBrush); painter.drawPath(path)
+        if st_type in ["pen", "highlighter", "eraser"] and stroke.get("style", Qt.SolidLine) == Qt.SolidLine:
+            if stroke.get("fill_enabled", False):
+                 if "points" in stroke and stroke["points"]:
+                     fill_path = QPainterPath()
+                     pts = stroke["points"]
+                     if pts:
+                         fill_path.moveTo(pts[0][0])
+                         for i in range(1, len(pts)): fill_path.lineTo(pts[i][0])
+                         fill_path.closeSubpath()
+                     painter.setPen(Qt.NoPen)
+                     painter.setBrush(stroke.get("fill_color", QColor(255, 200, 0, 100))) 
+                     painter.drawPath(fill_path)
+
+            if st_type == "highlighter":
+                 c = QColor(stroke["color"].red(), stroke["color"].green(), stroke["color"].blue(), 80)
+                 painter.setBrush(c); painter.setPen(Qt.NoPen)
+                 painter.setCompositionMode(QPainter.CompositionMode_Multiply) 
+            elif st_type == "eraser":
+                 painter.setCompositionMode(QPainter.CompositionMode_Clear)
+                 painter.setBrush(Qt.black); painter.setPen(Qt.NoPen)
+            else:
+                 painter.setBrush(stroke["color"]); painter.setPen(Qt.NoPen)
+                 painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            painter.drawPath(path)
+        else:
+            pen = QPen(stroke["color"], stroke["size"], stroke.get("style", Qt.SolidLine), Qt.RoundCap, Qt.RoundJoin)
+            
+            if st_type == "highlighter":
+                pen.setColor(QColor(stroke["color"].red(), stroke["color"].green(), stroke["color"].blue(), 80))
+                pen.setWidth(stroke["size"] + 10); painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+            elif st_type == "eraser":
+                painter.setCompositionMode(QPainter.CompositionMode_Clear); pen.setColor(Qt.transparent); pen.setWidth(stroke["size"])
+            else:
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                
+            painter.setPen(pen)
+            
+            if stroke.get("fill_enabled", False):
+                painter.setBrush(stroke.get("fill_color", QColor(255, 200, 0, 100)))
+            else:
+                painter.setBrush(Qt.NoBrush)
+            
+            if "points" in stroke and stroke["points"]:
+                simple_path = QPainterPath()
+                pts = stroke["points"]
+                if pts:
+                    simple_path.moveTo(pts[0][0])
+                    for i in range(1, len(pts)): simple_path.lineTo(pts[i][0])
+                painter.drawPath(simple_path)
+            else:
+                painter.drawPath(path)
 
     def generate_shape_path(self, path, shape_type, start, end):
         rect = QRect(start, end).normalized()
@@ -837,7 +1024,8 @@ class Canvas(QWidget):
             poly.append(poly[0]); path.addPolygon(poly)
 
     def delete_stroke_at(self, pos):
-        eraser_area = QPainterPath(); eraser_area.addEllipse(pos, 10, 10) 
+        r = self.active_size / 2
+        eraser_area = QPainterPath(); eraser_area.addEllipse(pos, r, r) 
         for i in range(len(self.strokes) - 1, -1, -1):
             stroke = self.strokes[i]
             if stroke["type"] == "text":
@@ -859,33 +1047,18 @@ class Canvas(QWidget):
             self.draw_stroke_entity(painter, self.snapped_shape)
         elif self.current_stroke:
             painter.setRenderHint(QPainter.Antialiasing)
-            if self.current_stroke["type"] != "text":
-                if self.current_stroke["type"] not in ["pen", "highlighter", "eraser", "laser_pen"]:
-                    temp_path = QPainterPath()
-                    self.generate_shape_path(temp_path, self.current_stroke["type"], self.current_stroke["start"], self.current_stroke["end"])
-                    temp_stroke = self.current_stroke.copy(); temp_stroke["path"] = temp_path
-                    self.draw_stroke_entity(painter, temp_stroke)
-                else: self.draw_stroke_entity(painter, self.current_stroke)
+            st_type = self.current_stroke["type"]
+            
+            if st_type in ["pen", "highlighter", "eraser", "laser_pen"]:
+                self.draw_stroke_entity(painter, self.current_stroke)
+            else:
+                temp_path = QPainterPath()
+                self.generate_shape_path(temp_path, st_type, self.current_stroke["start"], self.current_stroke["end"])
+                
+                temp_stroke = self.current_stroke.copy()
+                temp_stroke["path"] = temp_path
+                self.draw_stroke_entity(painter, temp_stroke)
         
-        if self.laser_points:
-            painter.setRenderHint(QPainter.Antialiasing)
-            points_len = len(self.laser_points)
-            if points_len > 1:
-                base_color = state.current_color 
-                for i in range(points_len - 1):
-                    opacity_factor = (i + 1) / points_len 
-                    opacity = int((opacity_factor ** 2) * 255)
-                    segment_color = QColor(base_color)
-                    segment_color.setAlpha(opacity)
-                    pen = QPen(segment_color, 6 * opacity_factor, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-                    painter.setPen(pen)
-                    painter.drawLine(self.laser_points[i], self.laser_points[i+1])
-            head_pos = self.laser_points[-1]
-            painter.setPen(Qt.NoPen); painter.setBrush(QColor(state.current_color))
-            painter.drawEllipse(head_pos, 4, 4)
-            glow_color = QColor(state.current_color); glow_color.setAlpha(80)
-            painter.setBrush(glow_color); painter.drawEllipse(head_pos, 8, 8)
-
         if self.selected_indices:
             painter.setRenderHint(QPainter.Antialiasing)
             self.draw_selection_overlay(painter)

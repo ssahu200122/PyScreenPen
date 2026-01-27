@@ -14,7 +14,7 @@ class StateManager(QObject):
     selection_changed = Signal(bool) 
     background_changed = Signal(QColor)
 
-    # --- NEW FILL SIGNALS ---
+    # Fill Signals
     fill_toggled = Signal(bool)
     fill_color_changed = Signal(QColor)
 
@@ -28,26 +28,22 @@ class StateManager(QObject):
         self.board_color = QColor(255, 255, 255, 0)
         self.last_board_color = QColor("white")
         
-        # --- FILL SETTINGS (NEW) ---
-        self.is_fill_enabled = False
-        self.current_fill_color = QColor(255, 200, 0, 100) # Default yellow-ish tint
-        
-        # --- LASER SETTINGS ---
+        # Default yellow-ish tint
+        self.current_fill_color = QColor(255, 200, 0, 100) 
         self.laser_duration = 2.0 
         
         self.shape_tools = ["tool_line", "tool_arrow", "tool_rect", "tool_circle", "tool_polygon", "tool_star"]
         self.last_active_shape = "tool_line"
 
-        default_mem = {"color": QColor("#000000"), "thickness": 3, "opacity": 255, "style": Qt.SolidLine}
+        default_mem = {"color": QColor("#6c5ce7"), "thickness": 3, "opacity": 255, "style": Qt.SolidLine, "fill_enabled": False}
 
         self.tool_states = {
-            "tool_pen_1": { "color": QColor("#44ABFF"), "thickness": 3, "opacity": 255, "style": Qt.SolidLine },
-            "tool_pen_2": { "color": QColor("#FF4444"), "thickness": 5, "opacity": 255, "style": Qt.SolidLine },
-            "tool_hl":    { "color": QColor("#FFFF44"), "thickness": 20, "opacity": 100, "style": Qt.SolidLine },
+            "tool_pen_1": { "color": QColor("#44ABFF"), "thickness": 3, "opacity": 255, "style": Qt.SolidLine, "fill_enabled": False },
+            "tool_pen_2": { "color": QColor("#FF4444"), "thickness": 5, "opacity": 255, "style": Qt.SolidLine, "fill_enabled": False },
+            "tool_hl":    { "color": QColor("#FFFF44"), "thickness": 20, "opacity": 100, "style": Qt.SolidLine, "fill_enabled": False },
             "tool_text":  { "color": QColor("#000000"), "thickness": 12, "opacity": 255, "style": Qt.SolidLine, "font_style": "Normal" },
             "tool_eraser": { "color": QColor("white"), "thickness": 30, "opacity": 255, "style": Qt.SolidLine },
             
-            # Laser defaults
             "tool_laser": { "color": QColor("#FF0000"), "thickness": 6, "opacity": 255, "style": Qt.SolidLine },
 
             "tool_line":    default_mem.copy(),
@@ -58,7 +54,7 @@ class StateManager(QObject):
             "tool_star":    default_mem.copy(),
             "tool_cursor":  default_mem.copy(),
             "tool_select_rect": {}, "tool_select_lasso": {}, "tool_pan": {},
-            "default": { "color": QColor("black"), "thickness": 2, "opacity": 255, "style": Qt.SolidLine }
+            "default": { "color": QColor("black"), "thickness": 2, "opacity": 255, "style": Qt.SolidLine, "fill_enabled": False }
         }
         
         self.eraser_size = 30 
@@ -95,42 +91,31 @@ class StateManager(QObject):
     def current_style(self): return self.current_settings.get("style", Qt.SolidLine)
     @property
     def current_font_style(self): return self.current_settings.get("font_style", "Normal")
+    @property
+    def current_fill_enabled(self): return self.current_settings.get("fill_enabled", False)
 
     def set_selection_active(self, active: bool):
         if self.has_selection != active:
             self.has_selection = active
             self.selection_changed.emit(active)
 
-    # --- UPDATED SYNC (Includes Fill) ---
     def sync_tool_properties(self, color=None, thickness=None, style=None, fill_color=None, is_filled=None):
         s = self.tool_states["tool_cursor"]
-        
         if color: 
-            s["color"] = QColor(color)
-            self.color_changed.emit(s["color"])
-        
+            s["color"] = QColor(color); self.color_changed.emit(s["color"])
         if thickness: 
-            s["thickness"] = thickness
-            self.brush_changed.emit(thickness, s.get("opacity", 255))
-        
+            s["thickness"] = thickness; self.brush_changed.emit(thickness, s.get("opacity", 255))
         if style is not None: 
-            s["style"] = style
-            self.style_changed.emit("sync")
-
-        # Sync Fill Properties
+            s["style"] = style; self.style_changed.emit("sync")
         if fill_color:
-            self.current_fill_color = QColor(fill_color)
-            self.fill_color_changed.emit(self.current_fill_color)
-        
+            self.current_fill_color = QColor(fill_color); self.fill_color_changed.emit(self.current_fill_color)
         if is_filled is not None:
-            self.is_fill_enabled = is_filled
-            self.fill_toggled.emit(self.is_fill_enabled)
+            s["fill_enabled"] = is_filled; self.fill_toggled.emit(is_filled)
 
     def is_key_active(self, key):
         if not key: return False
-        
         if key == "toggle_board": return self.board_color.alpha() > 0
-        if key == "toggle_fill": return self.is_fill_enabled  # NEW
+        if key == "toggle_tool_fill": return self.current_fill_enabled
 
         if key.startswith("set_board_"):
             if key == "set_board_transparent": return self.board_color.alpha() == 0
@@ -142,10 +127,8 @@ class StateManager(QObject):
                 return c1.name() == c2.name() and self.board_color.alpha() > 0
             return False
 
-        if self.has_selection:
-            source_settings = self.tool_states["tool_cursor"]
-        else:
-            source_settings = self.current_settings
+        if self.has_selection: source_settings = self.tool_states["tool_cursor"]
+        else: source_settings = self.current_settings
 
         if key == self.active_tool_id: return True
         if key == "group_shapes" and self.active_tool_id in self.shape_tools: return True
@@ -157,14 +140,14 @@ class StateManager(QObject):
             c = source_settings.get("color", QColor("black")); c.setAlpha(255)
             return t.name().upper() == c.name().upper()
 
-        # Fill Color Active Check (NEW)
+        # [FIX] Fill Color Active Check - Ignore Alpha
         if key.startswith("set_fill_"):
             map_key = key.replace("set_fill_", "set_")
             if map_key in self.color_map:
                 t = QColor(self.color_map[map_key])
                 c = self.current_fill_color
-                # Compare RGB only
-                return t.name().upper() == c.name().upper()
+                # Compare RGB only (HexRgb avoids the alpha component)
+                return t.name(QColor.HexRgb).upper() == c.name(QColor.HexRgb).upper()
 
         if key.startswith("set_font_"): return key.replace("set_font_", "").lower() == source_settings.get("font_style", "Normal").lower()
         if key.startswith("set_style_"):
@@ -180,15 +163,17 @@ class StateManager(QObject):
 
         if action_key.startswith("set_laser_time_"):
             try:
-                val = int(action_key.split("_")[-1])
-                self.laser_duration = float(val) 
+                val = int(action_key.split("_")[-1]); self.laser_duration = float(val) 
             except ValueError: pass
             return
 
-        # --- FILL LOGIC (NEW) ---
-        if action_key == "toggle_fill":
-            self.is_fill_enabled = not self.is_fill_enabled
-            self.fill_toggled.emit(self.is_fill_enabled)
+        if action_key == "toggle_tool_fill":
+            new_state = not self.current_fill_enabled
+            if self.has_selection:
+                self.tool_states["tool_cursor"]["fill_enabled"] = new_state
+            else:
+                self.current_settings["fill_enabled"] = new_state
+            self.fill_toggled.emit(new_state)
             return
 
         if action_key.startswith("set_fill_opacity_"):
@@ -203,17 +188,14 @@ class StateManager(QObject):
             return
 
         if action_key.startswith("set_fill_"):
-            # Expecting format: set_fill_red, set_fill_blue etc.
             map_key = action_key.replace("set_fill_", "set_")
             if map_key in self.color_map:
                 base_color = QColor(self.color_map[map_key])
-                # Keep current opacity
                 current_alpha = self.current_fill_color.alpha()
                 base_color.setAlpha(current_alpha)
                 self.current_fill_color = base_color
                 self.fill_color_changed.emit(base_color)
             return
-        # --- END FILL LOGIC ---
 
         if action_key == "toggle_board":
             if self.board_color.alpha() > 0:
@@ -228,8 +210,7 @@ class StateManager(QObject):
         
         elif action_key.startswith("set_board_opacity_"):
             try:
-                val = int(action_key.split("_")[-1])
-                alpha = int((val / 100.0) * 255)
+                val = int(action_key.split("_")[-1]); alpha = int((val / 100.0) * 255)
                 if alpha == 0: alpha = 1 
                 self.board_color.setAlpha(alpha); self.background_changed.emit(self.board_color)
             except ValueError: pass
@@ -249,10 +230,10 @@ class StateManager(QObject):
             if "color" in s: self.color_changed.emit(s["color"])
             if "eraser" in action_key: self.brush_changed.emit(self.eraser_size, 255)
             elif "thickness" in s: self.brush_changed.emit(s["thickness"], s.get("opacity", 255))
+            if "fill_enabled" in s: self.fill_toggled.emit(s["fill_enabled"])
         
         elif action_key.startswith("set_text_"):
-            suffix = action_key.replace("set_text_", "")
-            size_map = {"small": 12, "medium": 24, "large": 48}
+            suffix = action_key.replace("set_text_", ""); size_map = {"small": 12, "medium": 24, "large": 48}
             if suffix in size_map:
                 self.tool_states["tool_text"]["thickness"] = size_map[suffix]
                 self.active_tool_id = "tool_text"; s = self.current_settings
@@ -278,8 +259,7 @@ class StateManager(QObject):
         
         elif action_key.startswith("set_opacity_"):
             try:
-                val = int(action_key.split("_")[-1])
-                alpha = int((val / 100.0) * 255)
+                val = int(action_key.split("_")[-1]); alpha = int((val / 100.0) * 255)
                 if self.has_selection:
                     c = self.tool_states["tool_cursor"]["color"]; c.setAlpha(alpha)
                     self.tool_states["tool_cursor"]["color"] = c; self.tool_states["tool_cursor"]["opacity"] = alpha

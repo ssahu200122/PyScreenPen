@@ -39,6 +39,7 @@ def create_menu_structure():
         MenuItem("Color", "color_wheel.png", QColor("white"), submenu_id="pen_settings", hide_label=True),
         MenuItem("Width", "thickness.png", QColor("white"), submenu_id="thickness_dial", badge="Edit", hide_label=True),
         MenuItem("Style", "boarderstyle.png", QColor("white"), submenu_id="style_options", badge="Edit", hide_label=True),
+        MenuItem("Fill", "color_wheel.png", QColor("white"), action_key="toggle_tool_fill", submenu_id="fill_settings", badge="Fill", hide_label=True), 
         MenuItem("Delete", "trash.png", QColor("#FF4444"), action_key="action_delete", hide_label=True),
         MenuItem("Done", "check.png", QColor("#44FF44"), action_key="action_deselect", hide_label=True),
     ]
@@ -87,8 +88,6 @@ def create_menu_structure():
         MenuItem("", None, submenu_id="green_shades", slice_color=QColor("#00CC66"), action_key="set_green", hide_label=True), 
     ]
     pages["laser_settings"] = MenuPage(laser_items, center_icon="laser.png")
-    
-    # --- UPDATED: RANGE 1 TO 30, INTERVAL 1 ---
     pages["laser_time_dial"] = MenuPage(items=[], page_type="dial", dial_range=(1, 30), dial_step=1, current_value=2, action_prefix="set_laser_time_", center_icon="back.png")
 
     # --- SHAPES ---
@@ -107,12 +106,26 @@ def create_menu_structure():
             MenuItem("", None, submenu_id="red_shades", slice_color=QColor("#FF4444"), action_key="set_red", hide_label=True),     
             MenuItem("", None, submenu_id="black_shades", slice_color=QColor("#111111"), action_key="set_black", hide_label=True),      
             MenuItem("Opacity", "opacity.png", QColor("white"), submenu_id="opacity_dial", badge="100", hide_label=True),
-            MenuItem("Width", "thickness.png", QColor("white"), submenu_id="thickness_dial", badge="3", hide_label=True),
+            # Fill now has 'toggle_tool_fill' key so main click toggles, arrow opens submenu
+            MenuItem("Fill", "color_wheel.png", QColor("white"), action_key="toggle_tool_fill", submenu_id="fill_settings", badge="Fill", hide_label=True),
             MenuItem("Style", "boarderstyle.png", QColor("white"), submenu_id="style_options", badge="Solid", hide_label=True),
-            MenuItem("", None, submenu_id="purple_shades", slice_color=QColor("#9F55FF"), action_key="set_purple", hide_label=True),  
+            MenuItem("Width", "thickness.png", QColor("white"), submenu_id="thickness_dial", badge="3", hide_label=True),
             MenuItem("", None, submenu_id="blue_shades", slice_color=QColor("#4488FF"), action_key="set_blue", hide_label=True),    
             MenuItem("", None, submenu_id="green_shades", slice_color=QColor("#00CC66"), action_key="set_green", hide_label=True), 
         ]
+
+    # --- [CHANGE] Fill Settings Submenu: Removed Toggle Button ---
+    fill_items = [
+        MenuItem("Opacity", "opacity.png", QColor("white"), submenu_id="fill_opacity_dial", badge="100", hide_label=True),
+        MenuItem("", None, submenu_id="fill_red_shades", slice_color=QColor("#FF4444"), action_key="set_fill_red", hide_label=True),
+        MenuItem("", None, submenu_id="fill_blue_shades", slice_color=QColor("#4488FF"), action_key="set_fill_blue", hide_label=True),
+        MenuItem("", None, submenu_id="fill_green_shades", slice_color=QColor("#00CC66"), action_key="set_fill_green", hide_label=True),
+        MenuItem("", None, submenu_id="fill_orange_shades", slice_color=QColor("#FFA500"), action_key="set_fill_orange", hide_label=True),
+        MenuItem("", None, submenu_id="fill_purple_shades", slice_color=QColor("#9F55FF"), action_key="set_fill_purple", hide_label=True),
+        MenuItem("", None, submenu_id="fill_black_shades", slice_color=QColor("#333333"), action_key="set_fill_black", hide_label=True),
+    ]
+    pages["fill_settings"] = MenuPage(fill_items, center_icon="color_wheel.png")
+    pages["fill_opacity_dial"] = MenuPage(items=[], page_type="dial", dial_range=(0, 100), dial_step=10, current_value=100, action_prefix="set_fill_opacity_", center_icon="back.png")
 
     pages["line_settings"] = MenuPage(create_shape_settings_items(), center_icon="line.png")
     pages["arrow_settings"] = MenuPage(create_shape_settings_items(), center_icon="arrow.png")
@@ -206,5 +219,20 @@ def create_menu_structure():
     pages["board_black_shades"] = create_board_color_page(black_shades)
     pages["board_blue_shades"] = create_board_color_page(blue_shades)
     pages["board_green_shades"] = create_board_color_page(green_shades)
+
+    # --- Fill Color Pages ---
+    def create_fill_color_page(base_items):
+        new_items = []
+        for item in base_items:
+            new_action = item.action_key.replace("set_", "set_fill_")
+            new_items.append(MenuItem("", None, action_key=new_action, slice_color=item.slice_color, hide_label=True))
+        return create_color_page(new_items)
+
+    pages["fill_red_shades"] = create_fill_color_page(red_shades)
+    pages["fill_blue_shades"] = create_fill_color_page(blue_shades)
+    pages["fill_green_shades"] = create_fill_color_page(green_shades)
+    pages["fill_orange_shades"] = create_fill_color_page(orange_shades)
+    pages["fill_purple_shades"] = create_fill_color_page(purple_shades)
+    pages["fill_black_shades"] = create_fill_color_page(black_shades)
 
     return pages
