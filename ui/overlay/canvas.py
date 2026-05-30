@@ -4,6 +4,8 @@ import time
 import cv2          
 import numpy as np
 import statistics
+import keyboard
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QLineEdit, QFileDialog, QApplication
 from PySide6.QtCore import Qt, QPoint, QRect, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
@@ -42,6 +44,7 @@ class FloatingTextInput(QLineEdit):
         self.setFixedSize(width, fm.height() + 10)
 
 class Canvas(QWidget):
+    global_hotkey_signal = Signal(str)
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -51,6 +54,8 @@ class Canvas(QWidget):
         
         self.strokes = []       
         self.redo_stack = [] 
+        self.clipboard = []              # ADD THIS LINE
+        # self.is_keyboard_rotating = False # ADD THIS LINE
         self.current_stroke = None 
         
         self.active_tool = "tool_pen_1"
@@ -131,6 +136,70 @@ class Canvas(QWidget):
         # Initialize Cursor
         QApplication.setOverrideCursor(Qt.ArrowCursor)
         self.set_tool(self.active_tool)
+
+        self.global_hotkey_signal.connect(self.process_global_hotkey)
+        self.setup_global_shortcuts()
+
+    def setup_global_shortcuts(self):
+        # These listen globally, even when clicking other apps!
+        keyboard.on_press_key("F2", lambda e: self.global_hotkey_signal.emit("F2"))
+        keyboard.on_press_key("F3", lambda e: self.global_hotkey_signal.emit("F3"))
+        keyboard.on_press_key("F4", lambda e: self.global_hotkey_signal.emit("F4"))
+        keyboard.on_press_key("F5", lambda e: self.global_hotkey_signal.emit("F5"))
+        keyboard.on_press_key("F6", lambda e: self.global_hotkey_signal.emit("F6"))
+        keyboard.on_press_key("F7", lambda e: self.global_hotkey_signal.emit("F7"))
+        keyboard.on_press_key("F8", lambda e: self.global_hotkey_signal.emit("F8"))
+        keyboard.on_press_key("F9", lambda e: self.global_hotkey_signal.emit("F9"))
+
+    def process_global_hotkey(self, key_str):
+        current_tool = state.active_tool_id
+
+        # Lower Button: Eraser Toggle
+        if key_str == "F8": 
+            if current_tool != "tool_eraser":
+                if current_tool not in ["tool_eraser", "tool_cursor", "tool_pan", "tool_select_lasso"]:
+                    self.last_drawing_tool = current_tool
+                state.set_active_tool("tool_eraser")
+            else:
+                target = getattr(self, "last_drawing_tool", "tool_pen_1")
+                state.set_active_tool(target)
+
+        # Upper Button: Pointer Toggle
+        elif key_str == "F9": 
+            if current_tool != "tool_cursor":
+                if current_tool not in ["tool_eraser", "tool_cursor", "tool_pan", "tool_select_lasso"]:
+                    self.last_drawing_tool = current_tool
+                state.set_active_tool("tool_cursor")
+            else:
+                target = getattr(self, "last_drawing_tool", "tool_pen_1")
+                state.set_active_tool(target)
+
+        # Express Keys
+        elif key_str == "F2":
+            state.set_active_tool("toggle_board")
+        elif key_str == "F3":
+            if current_tool == "tool_select_lasso":
+                state.set_active_tool("tool_pen_1")
+            else:
+                state.set_active_tool("tool_select_lasso")
+        elif key_str == "F4":
+            self.handle_action("clear_canvas")
+        elif key_str == "F5":
+            # Key 5 now INCREASES brush size
+            new_size = min(100, self.active_size + 2)
+            state.sync_tool_properties(thickness=new_size)
+            self.active_size = new_size
+            
+        elif key_str == "F6":
+            # Key 6 now DECREASES brush size
+            new_size = max(1, self.active_size - 2)
+            state.sync_tool_properties(thickness=new_size)
+            self.active_size = new_size
+        elif key_str == "F7":
+            if current_tool == "tool_laser":
+                state.set_active_tool("tool_hl")
+            else:
+                state.set_active_tool("tool_laser")
 
     def load_cursors(self):
         def create_cursor(filename, hot_x, hot_y, fallback=Qt.ArrowCursor):
@@ -217,28 +286,120 @@ class Canvas(QWidget):
     def keyPressEvent(self, event):
         key = event.key()
         
-        # Tablet Shortcuts
+        # --- STANDARD KEYBOARD SHORTCUTS ---
+        
         if key == Qt.Key_B: 
             if state.active_tool_id == "tool_pen_1": state.set_active_tool("tool_pen_2")
             else: state.set_active_tool("tool_pen_1")
+            
         elif key == Qt.Key_E:
             if "eraser" not in state.active_tool_id: state.set_active_tool("tool_eraser")
             else: state.set_active_tool("tool_pen_1") 
-        elif key == Qt.Key_H: state.set_active_tool("tool_hl")
-        elif key == Qt.Key_L: state.set_active_tool("tool_select_lasso")
+            
+        elif key == Qt.Key_H: 
+            state.set_active_tool("tool_hl")
+            
+        elif key == Qt.Key_L: 
+            state.set_active_tool("tool_select_lasso")
+            
         elif key == Qt.Key_S: 
             if state.active_tool_id == "tool_rect": state.set_active_tool("tool_circle")
             elif state.active_tool_id == "tool_circle": state.set_active_tool("tool_arrow")
             else: state.set_active_tool("tool_rect")
+            
         elif key == Qt.Key_Space:
             if state.active_tool_id == "tool_pan": state.set_active_tool("tool_pen_1")
             else: state.set_active_tool("tool_pan")
         
-        elif event.matches(QKeySequence.Undo): self.handle_action("action_undo"); event.accept()
-        elif event.matches(QKeySequence.Redo): self.handle_action("action_redo"); event.accept()
-        elif event.matches(QKeySequence.Save): self.save_canvas(); event.accept()
+        # --- ESSENTIAL SYSTEM ACTIONS ---
+        
+        elif event.matches(QKeySequence.Undo): 
+            self.handle_action("action_undo")
+            event.accept()
+            
+        elif event.matches(QKeySequence.Redo): 
+            self.handle_action("action_redo")
+            event.accept()
+            
+        elif event.matches(QKeySequence.Save): 
+            self.save_canvas()
+            event.accept()
+
+        # --- COPY AND PASTE ---
+        elif event.matches(QKeySequence.Copy):
+            if self.selected_indices:
+                self.clipboard = []
+                for i in self.selected_indices:
+                    stroke = self.strokes[i].copy()
+                    # We must create deep copies of paths and points so they don't link to the original
+                    if stroke["type"] != "text":
+                        stroke["path"] = QPainterPath(self.strokes[i]["path"])
+                    if "points" in stroke and stroke["points"]:
+                        stroke["points"] = list(stroke["points"])
+                    self.clipboard.append(stroke)
+            event.accept()
+
+        elif event.matches(QKeySequence.Paste):
+            if hasattr(self, 'clipboard') and self.clipboard:
+                new_indices = []
+                offset = QPointF(30, 30) # Offset so it doesn't paste perfectly on top
+                
+                self.selected_indices = []
+                
+                for stroke in self.clipboard:
+                    new_stroke = stroke.copy()
+                    if new_stroke["type"] == "text":
+                        new_stroke["pos"] = new_stroke["pos"] + offset.toPoint()
+                    else:
+                        new_path = QPainterPath(stroke["path"])
+                        new_path.translate(offset)
+                        new_stroke["path"] = new_path
+                        if "points" in new_stroke and new_stroke["points"]:
+                            new_stroke["points"] = [(p[0] + offset, p[1]) for p in stroke["points"]]
+                    
+                    self.strokes.append(new_stroke)
+                    new_indices.append(len(self.strokes) - 1)
+                
+                # Shift the clipboard offset so pasting again moves it further down
+                self.clipboard = []
+                for i in new_indices:
+                    s = self.strokes[i].copy()
+                    if s["type"] != "text": s["path"] = QPainterPath(self.strokes[i]["path"])
+                    if "points" in s and s["points"]: s["points"] = list(s["points"])
+                    self.clipboard.append(s)
+                
+                self.selected_indices = new_indices
+                
+                # Rebuild the selection highlight box around the new pasted items
+                united_rect = QRectF()
+                first = True
+                for i in self.selected_indices:
+                    stroke = self.strokes[i]
+                    if stroke["type"] == "text":
+                        txt_w = stroke.get("text_width", 100)
+                        txt_h = stroke.get("text_height", stroke["size"] + 5)
+                        item_rect = QRectF(stroke["pos"].x(), stroke["pos"].y() - stroke["size"], txt_w, txt_h)
+                    else:
+                        item_rect = stroke["path"].boundingRect()
+                    if first: united_rect = item_rect; first = False
+                    else: united_rect = united_rect.united(item_rect)
+                
+                self.selection_rect = united_rect.adjusted(-10, -10, 10, 10)
+                self.selection_path = QPainterPath()
+                self.selection_path.addRect(self.selection_rect)
+                btn_size = 28
+                self.edit_btn_rect = QRectF(self.selection_rect.right() - btn_size/2, self.selection_rect.top() - btn_size/2, btn_size, btn_size)
+                
+                state.set_selection_active(True)
+                self.redraw_buffer()
+                self.update()
+            event.accept()
+
+            
         elif key == Qt.Key_Escape:
-            if self.active_text_widget: self.active_text_widget.deleteLater(); self.active_text_widget = None
+            if self.active_text_widget: 
+                self.active_text_widget.deleteLater()
+                self.active_text_widget = None
             else: 
                 self.selected_indices = []
                 self.selection_path = None
@@ -248,18 +409,23 @@ class Canvas(QWidget):
                 state.set_active_tool("tool_cursor")
             self.update()
             event.accept()
+            
         elif key == Qt.Key_Delete:
             if self.selected_indices:
-                for idx in sorted(self.selected_indices, reverse=True): self.strokes.pop(idx)
+                for idx in sorted(self.selected_indices, reverse=True): 
+                    self.strokes.pop(idx)
                 self.selected_indices = []
                 self.selection_path = None
                 self.edit_btn_rect = None 
                 state.set_selection_active(False)
                 self.redraw_buffer()
                 self.update()
-            else: self.handle_action("clear_canvas")
+            else: 
+                self.handle_action("clear_canvas")
             event.accept()
-        else: super().keyPressEvent(event)
+            
+        else: 
+            super().keyPressEvent(event)
 
     def set_tool(self, tool_id):
         if "select" not in tool_id and "cursor" not in tool_id:
@@ -647,9 +813,25 @@ class Canvas(QWidget):
         pressure = math.pow(pressure, 1.4) 
 
         if event_type == "press":
-            if buttons == Qt.RightButton:
-                context = "selection_context" if self.selected_indices else "root"
-                state.request_menu_context.emit(context)
+
+        
+            # --- REQUIREMENT 1 & 2: Stylus Button Toggles ---
+            if buttons == Qt.RightButton: # Lower Pen Button
+                if "eraser" not in state.active_tool_id:
+                    self.previous_tool_before_eraser = state.active_tool_id
+                    state.set_active_tool("tool_eraser")
+                else:
+                    if hasattr(self, 'previous_tool_before_eraser') and self.previous_tool_before_eraser:
+                        state.set_active_tool(self.previous_tool_before_eraser)
+                return
+
+            if buttons == Qt.MiddleButton: # Upper Pen Button
+                if "cursor" not in state.active_tool_id:
+                    self.previous_tool_before_cursor = state.active_tool_id
+                    state.set_active_tool("tool_cursor")
+                else:
+                    if hasattr(self, 'previous_tool_before_cursor') and self.previous_tool_before_cursor:
+                        state.set_active_tool(self.previous_tool_before_cursor)
                 return
 
             # [FIX] Robust Left Click check (some tablets send NoButton on tip press)

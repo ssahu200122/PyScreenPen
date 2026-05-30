@@ -25,8 +25,8 @@ class StateManager(QObject):
         self.is_whiteboard_mode = False
         self.has_selection = False 
         
-        self.board_color = QColor(255, 255, 255, 0)
-        self.last_board_color = QColor("white")
+        self.board_color = QColor(0, 0, 0, 0)
+        self.last_board_color = QColor("black")
         
         # Default yellow-ish tint
         self.current_fill_color = QColor(255, 200, 0, 100) 
@@ -202,7 +202,7 @@ class StateManager(QObject):
                 self.last_board_color = QColor(self.board_color); self.board_color.setAlpha(0)
             else:
                 self.board_color = QColor(self.last_board_color)
-                if self.board_color.alpha() == 0: self.board_color = QColor("white")
+                if self.board_color.alpha() == 0: self.board_color = QColor("black") # Updated fallback
             self.background_changed.emit(self.board_color); return
 
         elif action_key == "set_board_transparent":
