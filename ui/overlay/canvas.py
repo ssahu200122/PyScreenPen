@@ -185,16 +185,20 @@ class Canvas(QWidget):
         elif key_str == "F4":
             self.handle_action("clear_canvas")
         elif key_str == "F5":
-            # Key 5 now INCREASES brush size
+            # Increase brush size and save it to the CURRENT tool's memory
             new_size = min(100, self.active_size + 2)
-            state.sync_tool_properties(thickness=new_size)
-            self.active_size = new_size
+            if "eraser" in current_tool:
+                state.set_active_tool(f"set_eraser_size_{new_size}")
+            else:
+                state.set_active_tool(f"set_thickness_{new_size}")
             
         elif key_str == "F6":
-            # Key 6 now DECREASES brush size
+            # Decrease brush size and save it to the CURRENT tool's memory
             new_size = max(1, self.active_size - 2)
-            state.sync_tool_properties(thickness=new_size)
-            self.active_size = new_size
+            if "eraser" in current_tool:
+                state.set_active_tool(f"set_eraser_size_{new_size}")
+            else:
+                state.set_active_tool(f"set_thickness_{new_size}")
         elif key_str == "F7":
             if current_tool == "tool_laser":
                 state.set_active_tool("tool_hl")

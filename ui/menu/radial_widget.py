@@ -1,6 +1,6 @@
 import math
 import os
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore import Qt, QPoint, QRectF, Signal, Property, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QBrush, QFont, QPixmap, QRadialGradient
 
@@ -18,10 +18,14 @@ class DrawboardMenu(QWidget):
         self.setMouseTracking(True)
         self.setFixedSize(340, 340) 
         self.center = QPoint(170, 170)
+
+
         self.base_inner_radius = 30    
         self.base_rim_radius = 90      
         self.base_outer_radius = 120   
+
         self.pages = create_menu_structure()
+
         self.current_page_id = "root"
         self.history_stack = []
         self.hovered_index = -1
@@ -29,13 +33,28 @@ class DrawboardMenu(QWidget):
         self.hovered_zone = None 
         self.dragging_window = False 
         self.dragging_dial = False   
+
         self.drag_start_pos = QPoint()
         self.has_moved = False
         self.icon_cache = {} 
         self.pending_page_id = None
         self.is_navigating = False
         self.animation_style = "spin" 
-        self._expansion = 1.0
+
+        self._expansion = 0.0
+
+        # --- 2. MOVE TO BOTTOM RIGHT CORNER ---
+        screen_geo = QApplication.primaryScreen().availableGeometry()
+        margin = -120 # Pixels of padding from the edge of the screen
+        x = screen_geo.width() - self.width() - margin
+        y = screen_geo.height() - self.height() - margin
+
+        self.move(x, y)
+        
+        self.anim = QPropertyAnimation(self, b"expansion")
+        self.anim.finished.connect(self.on_animation_finished)
+
+
         self.anim = QPropertyAnimation(self, b"expansion")
         self.anim.finished.connect(self.on_animation_finished)
         state.tool_changed.connect(self.update)
