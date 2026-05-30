@@ -1,24 +1,45 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QSharedMemory
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from ui.overlay.canvas import Canvas
 from ui.menu.radial_widget import DrawboardMenu
+
+# A unique name for your application's local server
+SERVER_NAME = "PyScreenPen_Toggle_Server"
 
 def main():
     app = QApplication(sys.argv)
     
-    # --- SINGLE INSTANCE LOCK ---
-    # Create a unique memory ID for this application
-    shared_mem = QSharedMemory("PyScreenPen_Unique_Instance_Lock")
+    # --- STEP 1: Check if the app is already running ---
+    socket = QLocalSocket()
+    socket.connectToServer(SERVER_NAME)
     
-    # Try to attach to it. If successful, another instance is already running.
-    if shared_mem.attach():
-        sys.exit(0) # Silently close this duplicate instance
+    if socket.waitForConnected(500):
+        # Connection successful! This means the app is already open.
+        # Send the shutdown command to the running instance.
+        socket.write(b"SHUTDOWN")
+        socket.waitForBytesWritten(500)
+        socket.disconnectFromServer()
+        sys.exit(0) # Close this duplicate launch instantly
         
-    # If not attached, create the memory block to claim ownership
-    shared_mem.create(1)
-    # ----------------------------
+    # --- STEP 2: First Instance Setup ---
+    # If the socket couldn't connect, this is the first time launching.
+    # Clean up any leftover server configurations from past crashes, then start the server.
+    QLocalServer.removeServer(SERVER_NAME)
+    server = QLocalServer()
+    server.listen(SERVER_NAME)
     
+    # Function to listen for future Key 1 presses (new connections)
+    def handle_new_connection():
+        client = server.nextPendingConnection()
+        if client.waitForReadyRead(500):
+            message = client.readAll().data()
+            if message == b"SHUTDOWN":
+                app.quit() # Cleanly close the whole application
+                
+    server.newConnection.connect(handle_new_connection)
+    
+    # --- STEP 3: Boot the Application ---
     canvas = Canvas()
     canvas.showFullScreen()
     
