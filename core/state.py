@@ -1,8 +1,16 @@
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor, Qt
 
+import os
+import json
+from PySide6.QtCore import QObject, Signal, QPointF
+from PySide6.QtGui import QColor, QPainterPath
+
+# The file where your settings will be saved permanently
+CONFIG_FILE = "settings.json"
+
 class StateManager(QObject):
-    # Signals
+    # --- SIGNALS ---
     tool_changed = Signal(str)          
     color_changed = Signal(QColor)      
     brush_changed = Signal(int, int)    
@@ -13,20 +21,40 @@ class StateManager(QObject):
     request_menu_context = Signal(str) 
     selection_changed = Signal(bool) 
     background_changed = Signal(QColor)
+    board_state_changed = Signal(bool)
 
-    # Fill Signals
+    # --- Fill Signals ---
     fill_toggled = Signal(bool)
-    fill_color_changed = Signal(QColor)
+    fill_color_changed = Signal(QColor)  # <--- Add this missing line!
+    opacity_changed = Signal(int)
+    font_changed = Signal(dict)
+    text_style_changed = Signal(str)
 
     def __init__(self):
         super().__init__()
         
+        # --- DYNAMIC SHORTCUTS MEMORY BANK ---
+        self._shortcuts = {
+            "increase_size": "F5",
+            "decrease_size": "F6",
+            "toggle_eraser": "F8",
+            "toggle_cursor": "F9",
+            "toggle_board": "F2",
+            "toggle_lasso": "F3",
+            "clear_canvas": "F4",
+            "toggle_laser": "F7"
+        }
+        
+        # Load any saved shortcuts from the JSON file
+        self.load_settings()
+        # -------------------------------------
+
         self.active_tool_id = "tool_pen_1"
         self.is_whiteboard_mode = False
         self.has_selection = False 
         
-        self.board_color = QColor(0, 0, 0, 0)
-        self.last_board_color = QColor("black")
+        self.board_color = QColor(255, 255, 255, 0)
+        self.last_board_color = QColor("white")
         
         # Default yellow-ish tint
         self.current_fill_color = QColor(255, 200, 0, 100) 
@@ -78,6 +106,34 @@ class StateManager(QObject):
             "set_gold": "#FFD700", "set_orange": "#FFA500", "set_dark_orange": "#FF8C00", "set_brown": "#A52A2A",
             "set_chocolate": "#D2691E", "set_sienna": "#A0522D", "set_peach": "#FFDAB9", "set_tan": "#D2B48C"
         }
+
+
+    def load_settings(self):
+        """Loads the shortcuts from the JSON file when the app starts."""
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r") as f:
+                    saved_shortcuts = json.load(f)
+                    # Merge the saved keys over the defaults
+                    self._shortcuts.update(saved_shortcuts)
+            except Exception as e:
+                print(f"Error loading settings: {e}")
+
+    def save_settings(self):
+        """Writes the current shortcuts to the JSON file."""
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(self._shortcuts, f, indent=4)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+
+    def get_shortcut(self, action_name):
+        return self._shortcuts.get(action_name, "")
+
+    def set_shortcut(self, action_name, key_sequence_str):
+        self._shortcuts[action_name] = key_sequence_str
+        # Instantly save the file to the hard drive every time a key is changed!
+        self.save_settings()
 
     @property
     def current_settings(self): return self.tool_states.get(self.active_tool_id, self.tool_states["default"])

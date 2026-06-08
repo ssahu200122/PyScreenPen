@@ -6,7 +6,6 @@ from ui.menu.radial_widget import DrawboardMenu
 
 # A unique name for your application's local server
 SERVER_NAME = "PyScreenPen_Toggle_Server"
-
 def main():
     app = QApplication(sys.argv)
     

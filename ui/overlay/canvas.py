@@ -141,21 +141,54 @@ class Canvas(QWidget):
         self.setup_global_shortcuts()
 
     def setup_global_shortcuts(self):
-        # These listen globally, even when clicking other apps!
-        keyboard.on_press_key("F2", lambda e: self.global_hotkey_signal.emit("F2"))
-        keyboard.on_press_key("F3", lambda e: self.global_hotkey_signal.emit("F3"))
-        keyboard.on_press_key("F4", lambda e: self.global_hotkey_signal.emit("F4"))
-        keyboard.on_press_key("F5", lambda e: self.global_hotkey_signal.emit("F5"))
-        keyboard.on_press_key("F6", lambda e: self.global_hotkey_signal.emit("F6"))
-        keyboard.on_press_key("F7", lambda e: self.global_hotkey_signal.emit("F7"))
-        keyboard.on_press_key("F8", lambda e: self.global_hotkey_signal.emit("F8"))
-        keyboard.on_press_key("F9", lambda e: self.global_hotkey_signal.emit("F9"))
+        import keyboard 
+        
+        # Clear any existing hooks to prevent duplicate triggers
+        keyboard.unhook_all()
 
-    def process_global_hotkey(self, key_str):
+        # Helper function to dynamically register custom shortcuts from state
+        def bind_dynamic_key(action_id):
+            key_seq = state.get_shortcut(action_id)
+            if not key_seq: return
+            
+            # Convert PySide format to keyboard library format
+            kb_seq = key_seq.lower().replace("meta", "windows")
+            try:
+                keyboard.add_hotkey(kb_seq, lambda: self.global_hotkey_signal.emit(action_id), suppress=True)
+            except Exception as e:
+                print(f"Failed to bind hotkey {kb_seq}: {e}")
+
+        # List of all action IDs that need global binding
+        action_ids = [
+            "increase_size", "decrease_size", "toggle_eraser", 
+            "toggle_cursor", "toggle_board", "toggle_lasso", 
+            "clear_canvas", "toggle_laser"
+        ]
+
+        # Loop through and bind them all dynamically
+        for aid in action_ids:
+            bind_dynamic_key(aid)
+
+    def process_global_hotkey(self, action_id):
         current_tool = state.active_tool_id
 
-        # Lower Button: Eraser Toggle
-        if key_str == "F8": 
+        # --- DYNAMIC ACTIONS ---
+        if action_id == "increase_size":
+            new_size = min(100, self.active_size + 2)
+            if "eraser" in current_tool:
+                state.set_active_tool(f"set_eraser_size_{new_size}")
+            else:
+                state.set_active_tool(f"set_thickness_{new_size}")
+                
+        elif action_id == "decrease_size":
+            new_size = max(1, self.active_size - 2)
+            if "eraser" in current_tool:
+                state.set_active_tool(f"set_eraser_size_{new_size}")
+            else:
+                state.set_active_tool(f"set_thickness_{new_size}")
+
+        # --- TABLET TOGGLES ---
+        elif action_id == "toggle_eraser": 
             if current_tool != "tool_eraser":
                 if current_tool not in ["tool_eraser", "tool_cursor", "tool_pan", "tool_select_lasso"]:
                     self.last_drawing_tool = current_tool
@@ -164,8 +197,7 @@ class Canvas(QWidget):
                 target = getattr(self, "last_drawing_tool", "tool_pen_1")
                 state.set_active_tool(target)
 
-        # Upper Button: Pointer Toggle
-        elif key_str == "F9": 
+        elif action_id == "toggle_cursor": 
             if current_tool != "tool_cursor":
                 if current_tool not in ["tool_eraser", "tool_cursor", "tool_pan", "tool_select_lasso"]:
                     self.last_drawing_tool = current_tool
@@ -174,32 +206,19 @@ class Canvas(QWidget):
                 target = getattr(self, "last_drawing_tool", "tool_pen_1")
                 state.set_active_tool(target)
 
-        # Express Keys
-        elif key_str == "F2":
+        elif action_id == "toggle_board":
             state.set_active_tool("toggle_board")
-        elif key_str == "F3":
+            
+        elif action_id == "toggle_lasso":
             if current_tool == "tool_select_lasso":
                 state.set_active_tool("tool_pen_1")
             else:
                 state.set_active_tool("tool_select_lasso")
-        elif key_str == "F4":
+                
+        elif action_id == "clear_canvas":
             self.handle_action("clear_canvas")
-        elif key_str == "F5":
-            # Increase brush size and save it to the CURRENT tool's memory
-            new_size = min(100, self.active_size + 2)
-            if "eraser" in current_tool:
-                state.set_active_tool(f"set_eraser_size_{new_size}")
-            else:
-                state.set_active_tool(f"set_thickness_{new_size}")
             
-        elif key_str == "F6":
-            # Decrease brush size and save it to the CURRENT tool's memory
-            new_size = max(1, self.active_size - 2)
-            if "eraser" in current_tool:
-                state.set_active_tool(f"set_eraser_size_{new_size}")
-            else:
-                state.set_active_tool(f"set_thickness_{new_size}")
-        elif key_str == "F7":
+        elif action_id == "toggle_laser":
             if current_tool == "tool_laser":
                 state.set_active_tool("tool_hl")
             else:
