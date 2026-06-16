@@ -1,10 +1,10 @@
 {
-    "increase_size": "F5",
-    "decrease_size": "F6",
-    "toggle_eraser": "F8",
-    "toggle_cursor": "F9",
-    "toggle_board": "F2",
-    "toggle_lasso": "F3",
-    "clear_canvas": "F4",
-    "toggle_laser": "F7"
+    "increase_size": "Ctrl+Shift+{",
+    "decrease_size": "Ctrl+Shift+}",
+    "toggle_eraser": "Ctrl+.",
+    "toggle_cursor": "Ctrl+Shift+T",
+    "toggle_board": "Ctrl+Shift+W",
+    "toggle_lasso": "Ctrl+Shift+L",
+    "clear_canvas": "Ctrl+Shift+D",
+    "toggle_laser": "Ctrl+Shift+H"
 }

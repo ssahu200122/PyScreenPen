@@ -147,14 +147,28 @@ class Canvas(QWidget):
         keyboard.unhook_all()
 
         # Helper function to dynamically register custom shortcuts from state
+        # Helper function to dynamically register custom shortcuts from state
         def bind_dynamic_key(action_id):
             key_seq = state.get_shortcut(action_id)
             if not key_seq: return
             
-            # Convert PySide format to keyboard library format
-            kb_seq = key_seq.lower().replace("meta", "windows")
+            # Deep clean the string format to perfectly match the keyboard library
+            kb_seq = key_seq.lower()
+            kb_seq = kb_seq.replace("meta", "windows")
+            kb_seq = kb_seq.replace("control", "ctrl")
+            kb_seq = kb_seq.replace("escape", "esc")
+            kb_seq = kb_seq.replace("return", "enter")
+            kb_seq = kb_seq.replace(" ", "") # Strip any accidental spaces
+            
             try:
-                keyboard.add_hotkey(kb_seq, lambda: self.global_hotkey_signal.emit(action_id), suppress=True)
+                # [THE FIX] Added trigger_on_release=True
+                # This guarantees the OS cannot read the base key when modifiers are lifted
+                keyboard.add_hotkey(
+                    kb_seq, 
+                    lambda a=action_id: self.global_hotkey_signal.emit(a), 
+                    suppress=True,
+                    trigger_on_release=True
+                )
             except Exception as e:
                 print(f"Failed to bind hotkey {kb_seq}: {e}")
 
@@ -189,22 +203,18 @@ class Canvas(QWidget):
 
         # --- TABLET TOGGLES ---
         elif action_id == "toggle_eraser": 
-            if current_tool != "tool_eraser":
-                if current_tool not in ["tool_eraser", "tool_cursor", "tool_pan", "tool_select_lasso"]:
-                    self.last_drawing_tool = current_tool
-                state.set_active_tool("tool_eraser")
+            if current_tool == "tool_eraser":
+                # Safely bounce back to the isolated pen memory (defaults to pen 1)
+                state.set_active_tool(getattr(self, "last_pen_used", "tool_pen_1"))
             else:
-                target = getattr(self, "last_drawing_tool", "tool_pen_1")
-                state.set_active_tool(target)
+                state.set_active_tool("tool_eraser")
 
         elif action_id == "toggle_cursor": 
-            if current_tool != "tool_cursor":
-                if current_tool not in ["tool_eraser", "tool_cursor", "tool_pan", "tool_select_lasso"]:
-                    self.last_drawing_tool = current_tool
-                state.set_active_tool("tool_cursor")
+            if current_tool == "tool_cursor":
+                # Safely bounce back to the isolated pen memory
+                state.set_active_tool(getattr(self, "last_pen_used", "tool_pen_1"))
             else:
-                target = getattr(self, "last_drawing_tool", "tool_pen_1")
-                state.set_active_tool(target)
+                state.set_active_tool("tool_cursor")
 
         elif action_id == "toggle_board":
             state.set_active_tool("toggle_board")
@@ -457,6 +467,9 @@ class Canvas(QWidget):
             self.edit_btn_rect = None
             state.set_selection_active(False)
             self.update()
+
+        if tool_id in ["tool_pen_1", "tool_pen_2"]:
+            self.last_pen_used = tool_id
 
         self.active_tool = tool_id
         if self.active_text_widget: self.active_text_widget.deleteLater(); self.active_text_widget = None
@@ -781,24 +794,24 @@ class Canvas(QWidget):
             path.closeSubpath()
         
         path.setFillRule(Qt.WindingFill)
-        
+
         return path
 
     def tabletEvent(self, event: QTabletEvent):
         # [FIX] Safer logic to prevent crashes if QPointingDevice is missing/different
-        try:
-            if HAS_POINTING_DEVICE:
-                pt = event.pointerType()
-                if pt == QPointingDevice.PointerType.Eraser:
-                    if "eraser" not in self.active_tool:
-                        self.previous_tool_before_eraser = self.active_tool
-                        state.set_active_tool("tool_eraser")
-                elif pt == QPointingDevice.PointerType.Pen:
-                    if self.previous_tool_before_eraser:
-                        state.set_active_tool(self.previous_tool_before_eraser)
-                        self.previous_tool_before_eraser = None
-        except Exception:
-            pass # Gracefully ignore tablet feature failures
+        # try:
+        #     if HAS_POINTING_DEVICE:
+        #         pt = event.pointerType()
+        #         # if pt == QPointingDevice.PointerType.Eraser:
+        #         #     if "eraser" not in self.active_tool:ss
+        #         #         self.previous_tool_before_eraser = self.active_toolss
+        #         #         state.set_active_tool("tool_eraser")
+        #         # elif pt == QPointingDevice.PointerType.Pen:
+        #         #     if self.previous_tool_before_eraser:
+        #         #         state.set_active_tool(self.previous_tool_before_eraser)ssssss.
+        #         #         self.previous_tool_before_eraser = None
+        # except Exception:
+        #     pass # Gracefully ignore tablet feature failures
 
         # [FIX] Simplified extraction and force-start drawing
         pos = event.position()
@@ -839,23 +852,23 @@ class Canvas(QWidget):
 
         
             # --- REQUIREMENT 1 & 2: Stylus Button Toggles ---
-            if buttons == Qt.RightButton: # Lower Pen Button
-                if "eraser" not in state.active_tool_id:
-                    self.previous_tool_before_eraser = state.active_tool_id
-                    state.set_active_tool("tool_eraser")
-                else:
-                    if hasattr(self, 'previous_tool_before_eraser') and self.previous_tool_before_eraser:
-                        state.set_active_tool(self.previous_tool_before_eraser)
-                return
+            # if buttons == Qt.RightButton: # Lower Pen Button
+            #     if "eraser" not in state.active_tool_id:
+            #         self.previous_tool_before_eraser = state.active_tool_id
+            #         state.set_active_tool("tool_eraser")
+            #     else:
+            #         if hasattr(self, 'previous_tool_before_eraser') and self.previous_tool_before_eraser:
+            #             state.set_active_tool(self.previous_tool_before_eraser)
+            #     return
 
-            if buttons == Qt.MiddleButton: # Upper Pen Button
-                if "cursor" not in state.active_tool_id:
-                    self.previous_tool_before_cursor = state.active_tool_id
-                    state.set_active_tool("tool_cursor")
-                else:
-                    if hasattr(self, 'previous_tool_before_cursor') and self.previous_tool_before_cursor:
-                        state.set_active_tool(self.previous_tool_before_cursor)
-                return
+            # if buttons == Qt.MiddleButton: # Upper Pen Button
+            #     if "cursor" not in state.active_tool_id:
+            #         self.previous_tool_before_cursor = state.active_tool_id
+            #         state.set_active_tool("tool_cursor")
+            #     else:
+            #         if hasattr(self, 'previous_tool_before_cursor') and self.previous_tool_before_cursor:
+            #             state.set_active_tool(self.previous_tool_before_cursor)
+            #     return
 
             # [FIX] Robust Left Click check (some tablets send NoButton on tip press)
             if buttons == Qt.LeftButton or buttons == Qt.NoButton:

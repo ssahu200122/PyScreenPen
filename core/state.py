@@ -53,8 +53,9 @@ class StateManager(QObject):
         self.is_whiteboard_mode = False
         self.has_selection = False 
         
-        self.board_color = QColor(255, 255, 255, 0)
-        self.last_board_color = QColor("white")
+        # Changed to black and updated the transparent base to match
+        self.board_color = QColor(0, 0, 0, 0) 
+        self.last_board_color = QColor("black")
         
         # Default yellow-ish tint
         self.current_fill_color = QColor(255, 200, 0, 100) 
