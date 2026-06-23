@@ -1,7 +1,7 @@
 {
     "increase_size": "Ctrl+Shift+{",
     "decrease_size": "Ctrl+Shift+}",
-    "toggle_eraser": "B",
+    "toggle_eraser": "Alt+B",
     "toggle_cursor": "Ctrl+Shift+T",
     "toggle_board": "Ctrl+Shift+W",
     "toggle_lasso": "Ctrl+Shift+L",

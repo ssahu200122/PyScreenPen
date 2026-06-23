@@ -798,31 +798,33 @@ class Canvas(QWidget):
         return path
 
     def tabletEvent(self, event: QTabletEvent):
-        # [FIX] Safer logic to prevent crashes if QPointingDevice is missing/different
-        # try:
-        #     if HAS_POINTING_DEVICE:
-        #         pt = event.pointerType()
-        #         # if pt == QPointingDevice.PointerType.Eraser:
-        #         #     if "eraser" not in self.active_tool:ss
-        #         #         self.previous_tool_before_eraser = self.active_toolss
-        #         #         state.set_active_tool("tool_eraser")
-        #         # elif pt == QPointingDevice.PointerType.Pen:
-        #         #     if self.previous_tool_before_eraser:
-        #         #         state.set_active_tool(self.previous_tool_before_eraser)ssssss.
-        #         #         self.previous_tool_before_eraser = None
-        # except Exception:
-        #     pass # Gracefully ignore tablet feature failures
+        # --- NATIVE XP-PEN ERASER TOGGLE SUPPORT ---
+        try:
+            if HAS_POINTING_DEVICE:
+                pt = event.pointerType()
+                current_tool = state.active_tool_id
+                
+                # If the tablet hardware specifically reports "Eraser Mode"
+                if pt == QPointingDevice.PointerType.Eraser:
+                    if current_tool != "tool_eraser":
+                        state.set_active_tool("tool_eraser")
+                        
+                # If the tablet hardware reports "Pen Mode"
+                elif pt == QPointingDevice.PointerType.Pen:
+                    if current_tool == "tool_eraser":
+                        # Safely restore the exact pen you were using from memory!
+                        state.set_active_tool(getattr(self, "last_pen_used", "tool_pen_1"))
+        except Exception as e:
+            pass # Gracefully ignore if hardware doesn't support pointer types
+        # -------------------------------------------
 
-        # [FIX] Simplified extraction and force-start drawing
         pos = event.position()
         pressure = event.pressure()
         if pressure == 0.0: pressure = 1.0 # Fallback for some drivers
 
-        # If a tablet button is pressed (or tip is down), treat as click
         btns = event.buttons()
         
         if event.type() == QTabletEvent.TabletPress:
-            # Force Left Button if the driver sends NoButton on press
             if btns == Qt.NoButton: btns = Qt.LeftButton
             self._handle_input(pos, pressure, "press", btns)
             event.accept()
