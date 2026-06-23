@@ -1,6 +1,6 @@
 import math
 import os
-from PySide6.QtWidgets import QWidget, QApplication
+from PySide6.QtWidgets import QWidget, QApplication, QPushButton
 from PySide6.QtCore import Qt, QPoint, QRectF, Signal, Property, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QBrush, QFont, QPixmap, QRadialGradient
 
@@ -53,10 +53,36 @@ class DrawboardMenu(QWidget):
         
         self.anim = QPropertyAnimation(self, b"expansion")
         self.anim.finished.connect(self.on_animation_finished)
-
-
         self.anim = QPropertyAnimation(self, b"expansion")
         self.anim.finished.connect(self.on_animation_finished)
+
+        # --- SMALL PERIMETER QUIT BUTTON ---
+        self.close_btn = QPushButton("×", self)
+        self.close_btn.setFixedSize(20, 20)
+        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ff4757;
+                color: white;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: bold;
+                padding-bottom: 2px;
+            }
+            QPushButton:hover {
+                background-color: #ff6b81;
+            }
+        """)
+        # Perfect math for the top-right edge of a 120px radius circle inside a 340px widget
+        # Force the button to calculate its correct starting position based on the initial expansion state
+        self.set_expansion(0.0)
+        self.close_btn.clicked.connect(lambda: QApplication.instance().quit())
+        # self.close_btn.hide() # Hide it initially until the menu expands
+        
+        # Keep your existing state connections below this...
+        state.tool_changed.connect(self.update)
+
+
         state.tool_changed.connect(self.update)
         state.style_changed.connect(self.update)
         state.color_changed.connect(self.update)
@@ -88,8 +114,26 @@ class DrawboardMenu(QWidget):
         else: self.update()
 
     def get_expansion(self): return self._expansion
+
     def set_expansion(self, val):
-        self._expansion = val; self.update()
+        self._expansion = val
+        self.update()
+        
+        # Make the close button smoothly ride the perimeter during animation!
+        if hasattr(self, 'close_btn'):
+            # Calculate the current outer edge based on the animation value
+            cur_out = self.base_inner_radius + (self.base_outer_radius - self.base_inner_radius) * val
+            
+            # Find the 45-degree angle coordinate (0.7071 is sin/cos of 45 deg)
+            offset = cur_out * 0.7071
+            
+            # Center of widget is 170, 170. Subtract 10 to center the 20x20 button.
+            btn_x = 170 + offset - 10
+            btn_y = 170 - offset - 10
+            
+            self.close_btn.move(int(btn_x), int(btn_y))
+            self.close_btn.setVisible(True) # Keep it visible at all times
+
     expansion = Property(float, get_expansion, set_expansion)
 
     def get_icon(self, filename):

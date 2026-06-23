@@ -6,5 +6,7 @@
     "toggle_board": "Ctrl+Shift+W",
     "toggle_lasso": "Ctrl+Shift+L",
     "clear_canvas": "Ctrl+Shift+D",
-    "toggle_laser": "Ctrl+Shift+H"
+    "toggle_laser": "Ctrl+Shift+H",
+    "exit_app": "Ctrl+Q",
+    "toggle_visibility": "Ctrl+Shift+G"
 }

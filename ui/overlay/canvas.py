@@ -6,7 +6,7 @@ import numpy as np
 import statistics
 import keyboard
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QWidget, QLineEdit, QFileDialog, QApplication
+from PySide6.QtWidgets import QWidget, QLineEdit, QFileDialog, QApplication,QPushButton
 from PySide6.QtCore import Qt, QPoint, QRect, QPointF, QRectF, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QPainterPath, QBrush, QPolygonF, QRegion, 
@@ -50,6 +50,7 @@ class Canvas(QWidget):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
+        self.setAttribute(Qt.WA_TabletTracking)
         self.setFocusPolicy(Qt.StrongFocus)
         
         self.strokes = []       
@@ -139,6 +140,8 @@ class Canvas(QWidget):
 
         self.global_hotkey_signal.connect(self.process_global_hotkey)
         self.setup_global_shortcuts()
+        
+        
 
     def setup_global_shortcuts(self):
         import keyboard 
@@ -176,7 +179,7 @@ class Canvas(QWidget):
         action_ids = [
             "increase_size", "decrease_size", "toggle_eraser", 
             "toggle_cursor", "toggle_board", "toggle_lasso", 
-            "clear_canvas", "toggle_laser","exit_app"
+            "clear_canvas", "toggle_laser","exit_app","toggle_visibility"
         ]
 
         # Loop through and bind them all dynamically
@@ -237,6 +240,17 @@ class Canvas(QWidget):
         elif action_id == "exit_app":
             from PySide6.QtWidgets import QApplication
             QApplication.quit()
+
+        elif action_id == "toggle_visibility":
+            # Check current state and flip it
+            target_state = not self.isVisible()
+            
+            # Hide/Unhide the drawing canvas
+            self.setVisible(target_state)
+            
+            # Hide/Unhide the radial menu (if it exists)
+            if self.menu_ref:
+                self.menu_ref.setVisible(target_state)
 
     def load_cursors(self):
         def create_cursor(filename, hot_x, hot_y, fallback=Qt.ArrowCursor):
@@ -1154,6 +1168,9 @@ class Canvas(QWidget):
 
     def draw_stroke_entity(self, painter, stroke):
         st_type = stroke["type"]
+        # Detect if we are drawing directly to the live screen vs baking to the buffer
+        is_live = (painter.device() == self) 
+        
         if st_type == "text":
             painter.setPen(stroke["color"])
             font_style = stroke.get("font_style", "Normal")
@@ -1197,7 +1214,11 @@ class Canvas(QWidget):
             if st_type == "highlighter":
                  c = QColor(stroke["color"].red(), stroke["color"].green(), stroke["color"].blue(), 80)
                  painter.setBrush(c); painter.setPen(Qt.NoPen)
-                 painter.setCompositionMode(QPainter.CompositionMode_Multiply) 
+                 # --- FIX: Live strokes use SourceOver to prevent vanishing on black boards ---
+                 if is_live:
+                     painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                 else:
+                     painter.setCompositionMode(QPainter.CompositionMode_Multiply) 
             elif st_type == "eraser":
                  painter.setCompositionMode(QPainter.CompositionMode_Clear)
                  painter.setBrush(Qt.black); painter.setPen(Qt.NoPen)
@@ -1210,7 +1231,12 @@ class Canvas(QWidget):
             
             if st_type == "highlighter":
                 pen.setColor(QColor(stroke["color"].red(), stroke["color"].green(), stroke["color"].blue(), 80))
-                pen.setWidth(stroke["size"] + 10); painter.setCompositionMode(QPainter.CompositionMode_Multiply)
+                pen.setWidth(stroke["size"] + 10)
+                # --- FIX: Live strokes use SourceOver to prevent vanishing on black boards ---
+                if is_live:
+                    painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                else:
+                    painter.setCompositionMode(QPainter.CompositionMode_Multiply)
             elif st_type == "eraser":
                 painter.setCompositionMode(QPainter.CompositionMode_Clear); pen.setColor(Qt.transparent); pen.setWidth(stroke["size"])
             else:
