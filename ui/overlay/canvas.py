@@ -179,7 +179,7 @@ class Canvas(QWidget):
         action_ids = [
             "increase_size", "decrease_size", "toggle_eraser", 
             "toggle_cursor", "toggle_board", "toggle_lasso", 
-            "clear_canvas", "toggle_laser","exit_app","toggle_visibility"
+            "clear_canvas", "toggle_laser","exit_app","toggle_visibility", "toggle_ghost"
         ]
 
         # Loop through and bind them all dynamically
@@ -251,6 +251,11 @@ class Canvas(QWidget):
             # Hide/Unhide the radial menu (if it exists)
             if self.menu_ref:
                 self.menu_ref.setVisible(target_state)
+
+        elif action_id == "toggle_ghost":
+            if self.menu_ref:
+                self.menu_ref.setVisible(not self.menu_ref.isVisible())
+        
 
     def load_cursors(self):
         def create_cursor(filename, hot_x, hot_y, fallback=Qt.ArrowCursor):

@@ -138,7 +138,8 @@ class SettingsWindow(QDialog):
             ("clear_canvas", "Clear Entire Screen"),
             ("toggle_laser", "Toggle Laser / Highlighter"),
             ("exit_app", "Quit / Kill Application"),
-            ("toggle_visibility", "Hide / Unhide Overlay")
+            ("toggle_visibility", "Hide / Unhide Overlay"),
+            ("toggle_ghost", "Ghost Mode (Hide Menu Only)")
         ]
 
         for action_id, label_text in self.shortcut_actions:
