@@ -176,7 +176,7 @@ class Canvas(QWidget):
         action_ids = [
             "increase_size", "decrease_size", "toggle_eraser", 
             "toggle_cursor", "toggle_board", "toggle_lasso", 
-            "clear_canvas", "toggle_laser"
+            "clear_canvas", "toggle_laser","exit_app"
         ]
 
         # Loop through and bind them all dynamically
@@ -233,6 +233,10 @@ class Canvas(QWidget):
                 state.set_active_tool("tool_hl")
             else:
                 state.set_active_tool("tool_laser")
+
+        elif action_id == "exit_app":
+            from PySide6.QtWidgets import QApplication
+            QApplication.quit()
 
     def load_cursors(self):
         def create_cursor(filename, hot_x, hot_y, fallback=Qt.ArrowCursor):

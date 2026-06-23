@@ -42,7 +42,8 @@ class StateManager(QObject):
             "toggle_board": "F2",
             "toggle_lasso": "F3",
             "clear_canvas": "F4",
-            "toggle_laser": "F7"
+            "toggle_laser": "F7",
+            "exit_app": "Ctrl+Q"
         }
         
         # Load any saved shortcuts from the JSON file

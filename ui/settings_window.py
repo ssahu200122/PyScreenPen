@@ -136,7 +136,8 @@ class SettingsWindow(QDialog):
             ("toggle_board", "Toggle Whiteboard Background"),
             ("toggle_lasso", "Toggle Lasso Select"),
             ("clear_canvas", "Clear Entire Screen"),
-            ("toggle_laser", "Toggle Laser / Highlighter")
+            ("toggle_laser", "Toggle Laser / Highlighter"),
+            ("exit_app", "Quit / Kill Application")
         ]
 
         for action_id, label_text in self.shortcut_actions:
