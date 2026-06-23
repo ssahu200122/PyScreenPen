@@ -3,6 +3,7 @@ import os
 from PySide6.QtWidgets import QWidget, QApplication, QPushButton
 from PySide6.QtCore import Qt, QPoint, QRectF, Signal, Property, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QBrush, QFont, QPixmap, QRadialGradient
+import sys
 
 from ui.menu.menu_models import create_menu_structure
 from core.state import state 
@@ -139,9 +140,22 @@ class DrawboardMenu(QWidget):
     def get_icon(self, filename):
         if not filename: return None
         if filename not in self.icon_cache:
-            path = os.path.join("assets", filename)
-            if os.path.exists(path): self.icon_cache[filename] = QPixmap(path)
-            else: self.icon_cache[filename] = None
+            # --- PYINSTALLER PATH RESOLVER ---
+            try:
+                # PyInstaller creates a temp folder and stores path in _MEIPASS
+                base_path = sys._MEIPASS
+            except AttributeError:
+                # If running as a normal python script, use the current directory
+                base_path = os.path.abspath(".")
+                
+            path = os.path.join(base_path, "assets", filename)
+            # ---------------------------------
+            
+            if os.path.exists(path): 
+                self.icon_cache[filename] = QPixmap(path)
+            else: 
+                self.icon_cache[filename] = None
+                
         return self.icon_cache[filename]
 
     def get_current_page(self): return self.pages[self.current_page_id]

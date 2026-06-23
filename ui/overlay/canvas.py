@@ -1,5 +1,6 @@
 import math
 import os
+import sys
 import time
 import cv2          
 import numpy as np
@@ -13,6 +14,16 @@ from PySide6.QtGui import (
     QPixmap, QFont, QFontMetrics, QKeySequence, QCursor, QTransform, 
     QTabletEvent, QPainterPathStroker, QInputDevice
 )
+
+
+
+def get_asset_path(filename):
+    """Safely resolve asset paths for both dev and PyInstaller builds."""
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, "assets", filename)
 
 # Safe Import for QPointingDevice (Qt6)
 try:
@@ -259,9 +270,9 @@ class Canvas(QWidget):
 
     def load_cursors(self):
         def create_cursor(filename, hot_x, hot_y, fallback=Qt.ArrowCursor):
-            path = os.path.join("assets", filename)
+            path = get_asset_path(filename) 
             if os.path.exists(path):
-                pix = QPixmap(path)
+                pix = QPixmap(get_asset_path(path))
                 pix = pix.scaled(32, 32, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
                 return QCursor(pix, hot_x, hot_y)
             return QCursor(fallback)
@@ -1165,9 +1176,9 @@ class Canvas(QWidget):
         if self.edit_btn_rect:
             painter.setBrush(self.theme_border); painter.setPen(QPen(Qt.white, 2))
             painter.drawEllipse(self.edit_btn_rect)
-            icon_path = os.path.join("assets", "edit.png")
+            icon_path = get_asset_path("edit.png")
             if os.path.exists(icon_path):
-                pix = QPixmap(icon_path).scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix = QPixmap(get_asset_path(icon_path)).scaled(16, 16, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 icon_rect = QRectF(self.edit_btn_rect.center().x()-8, self.edit_btn_rect.center().y()-8, 16, 16)
                 painter.drawPixmap(icon_rect.toRect(), pix)
 

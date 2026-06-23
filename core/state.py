@@ -6,8 +6,21 @@ import json
 from PySide6.QtCore import QObject, Signal, QPointF
 from PySide6.QtGui import QColor, QPainterPath
 
-# The file where your settings will be saved permanently
-CONFIG_FILE = "settings.json"
+
+
+
+# --- APPDATA PATH RESOLVER ---
+# This safely gets C:\Users\YourName\AppData\Roaming\PyScreenPen
+appdata_dir = os.path.join(os.getenv('APPDATA'), 'PyScreenPen')
+
+# Make sure the folder actually exists before we try to save to it
+os.makedirs(appdata_dir, exist_ok=True)
+
+# The absolute, writable path to your settings file
+SETTINGS_PATH = os.path.join(appdata_dir, 'settings.json')
+# -----------------------------
+
+
 
 class StateManager(QObject):
     # --- SIGNALS ---
@@ -114,9 +127,9 @@ class StateManager(QObject):
 
     def load_settings(self):
         """Loads the shortcuts from the JSON file when the app starts."""
-        if os.path.exists(CONFIG_FILE):
+        if os.path.exists(SETTINGS_PATH):  # <--- Changed to SETTINGS_PATH
             try:
-                with open(CONFIG_FILE, "r") as f:
+                with open(SETTINGS_PATH, "r") as f: # <--- Changed to SETTINGS_PATH
                     saved_shortcuts = json.load(f)
                     # Merge the saved keys over the defaults
                     self._shortcuts.update(saved_shortcuts)
@@ -126,7 +139,7 @@ class StateManager(QObject):
     def save_settings(self):
         """Writes the current shortcuts to the JSON file."""
         try:
-            with open(CONFIG_FILE, "w") as f:
+            with open(SETTINGS_PATH, "w") as f:
                 json.dump(self._shortcuts, f, indent=4)
         except Exception as e:
             print(f"Error saving settings: {e}")
