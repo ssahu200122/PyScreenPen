@@ -1,26 +1,13 @@
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QColor, Qt
-
 import os
 import json
 from PySide6.QtCore import QObject, Signal, QPointF
-from PySide6.QtGui import QColor, QPainterPath
-
-
-
+from PySide6.QtGui import QColor, Qt, QPainterPath
 
 # --- APPDATA PATH RESOLVER ---
-# This safely gets C:\Users\YourName\AppData\Roaming\PyScreenPen
 appdata_dir = os.path.join(os.getenv('APPDATA'), 'PyScreenPen')
-
-# Make sure the folder actually exists before we try to save to it
 os.makedirs(appdata_dir, exist_ok=True)
-
-# The absolute, writable path to your settings file
 SETTINGS_PATH = os.path.join(appdata_dir, 'settings.json')
 # -----------------------------
-
-
 
 class StateManager(QObject):
     # --- SIGNALS ---
@@ -36,32 +23,37 @@ class StateManager(QObject):
     background_changed = Signal(QColor)
     board_state_changed = Signal(bool)
 
-    # --- Fill Signals ---
+    # --- Fill & Pattern Signals ---
     fill_toggled = Signal(bool)
-    fill_color_changed = Signal(QColor)  # <--- Add this missing line!
+    fill_color_changed = Signal(QColor)
     opacity_changed = Signal(int)
     font_changed = Signal(dict)
     text_style_changed = Signal(str)
+    
+    # NEW SIGNAL: Triggers canvas redraw when pattern settings change
+    pattern_changed = Signal()
 
     def __init__(self):
         super().__init__()
         
         # --- DYNAMIC SHORTCUTS MEMORY BANK ---
         self._shortcuts = {
-            "increase_size": "F5",
-            "decrease_size": "F6",
-            "toggle_eraser": "F8",
-            "toggle_cursor": "F9",
-            "toggle_board": "F2",
-            "toggle_lasso": "F3",
-            "clear_canvas": "F4",
-            "toggle_laser": "F7",
-            "exit_app": "Ctrl+Q",
-            "toggle_visibility": "F10",
-            "toggle_ghost": "F11"
+            "increase_size": "F5", "decrease_size": "F6", "toggle_eraser": "F8",
+            "toggle_cursor": "F9", "toggle_board": "F2", "toggle_lasso": "F3",
+            "clear_canvas": "F4", "toggle_laser": "F7", "exit_app": "Ctrl+Q",
+            "toggle_visibility": "F10", "toggle_ghost": "F11"
         }
         
-        # Load any saved shortcuts from the JSON file
+        # --- NEW: PATTERN SETTINGS ---
+        self.pattern_type = "none" # options: "none", "grid", "lines", "dots", "coordinate"
+        self.pattern_settings = {
+            "grid": {"spacing": 40, "color": "#808080", "opacity": 100, "thickness": 1},
+            "lines": {"spacing": 40, "color": "#808080", "opacity": 100, "thickness": 1},
+            "dots": {"spacing": 40, "color": "#808080", "opacity": 150, "thickness": 4},
+            "coordinate": {"spacing": 40, "color": "#808080", "opacity": 100, "thickness": 1, "axis_color": "#FF4444", "axis_thickness": 2}
+        }
+        
+        # Load any saved shortcuts & patterns from the JSON file
         self.load_settings()
         # -------------------------------------
 
@@ -69,11 +61,9 @@ class StateManager(QObject):
         self.is_whiteboard_mode = False
         self.has_selection = False 
         
-        # Changed to black and updated the transparent base to match
         self.board_color = QColor(0, 0, 0, 0) 
         self.last_board_color = QColor("black")
         
-        # Default yellow-ish tint
         self.current_fill_color = QColor(255, 200, 0, 100) 
         self.laser_duration = 2.0 
         
@@ -88,15 +78,11 @@ class StateManager(QObject):
             "tool_hl":    { "color": QColor("#FFFF44"), "thickness": 20, "opacity": 100, "style": Qt.SolidLine, "fill_enabled": False },
             "tool_text":  { "color": QColor("#000000"), "thickness": 12, "opacity": 255, "style": Qt.SolidLine, "font_style": "Normal" },
             "tool_eraser": { "color": QColor("white"), "thickness": 30, "opacity": 255, "style": Qt.SolidLine },
-            
             "tool_laser": { "color": QColor("#FF0000"), "thickness": 6, "opacity": 255, "style": Qt.SolidLine },
 
-            "tool_line":    default_mem.copy(),
-            "tool_arrow":   default_mem.copy(),
-            "tool_rect":    default_mem.copy(),
-            "tool_circle":  default_mem.copy(),
-            "tool_polygon": default_mem.copy(),
-            "tool_star":    default_mem.copy(),
+            "tool_line":    default_mem.copy(), "tool_arrow":   default_mem.copy(),
+            "tool_rect":    default_mem.copy(), "tool_circle":  default_mem.copy(),
+            "tool_polygon": default_mem.copy(), "tool_star":    default_mem.copy(),
             "tool_cursor":  default_mem.copy(),
             "tool_select_rect": {}, "tool_select_lasso": {}, "tool_pan": {},
             "default": { "color": QColor("black"), "thickness": 2, "opacity": 255, "style": Qt.SolidLine, "fill_enabled": False }
@@ -124,32 +110,55 @@ class StateManager(QObject):
             "set_chocolate": "#D2691E", "set_sienna": "#A0522D", "set_peach": "#FFDAB9", "set_tan": "#D2B48C"
         }
 
-
     def load_settings(self):
-        """Loads the shortcuts from the JSON file when the app starts."""
-        if os.path.exists(SETTINGS_PATH):  # <--- Changed to SETTINGS_PATH
+        """Loads the shortcuts and pattern settings from JSON gracefully."""
+        if os.path.exists(SETTINGS_PATH):
             try:
-                with open(SETTINGS_PATH, "r") as f: # <--- Changed to SETTINGS_PATH
-                    saved_shortcuts = json.load(f)
-                    # Merge the saved keys over the defaults
-                    self._shortcuts.update(saved_shortcuts)
+                with open(SETTINGS_PATH, "r") as f:
+                    data = json.load(f)
+                    # Check if it's the new nested dictionary format
+                    if "shortcuts" in data:
+                        self._shortcuts.update(data.get("shortcuts", {}))
+                        self.pattern_type = data.get("pattern_type", "none")
+                        loaded_patterns = data.get("pattern_settings", {})
+                        # Safely merge loaded pattern settings over defaults
+                        for k, v in loaded_patterns.items():
+                            if k in self.pattern_settings:
+                                self.pattern_settings[k].update(v)
+                    else:
+                        # Fallback for old flat format
+                        self._shortcuts.update({k:v for k,v in data.items() if isinstance(v, str)})
             except Exception as e:
                 print(f"Error loading settings: {e}")
 
     def save_settings(self):
-        """Writes the current shortcuts to the JSON file."""
+        """Writes the current shortcuts and patterns to the JSON file."""
         try:
+            data = {
+                "shortcuts": self._shortcuts,
+                "pattern_type": self.pattern_type,
+                "pattern_settings": self.pattern_settings
+            }
             with open(SETTINGS_PATH, "w") as f:
-                json.dump(self._shortcuts, f, indent=4)
+                json.dump(data, f, indent=4)
         except Exception as e:
             print(f"Error saving settings: {e}")
 
-    def get_shortcut(self, action_name):
-        return self._shortcuts.get(action_name, "")
+    # --- NEW: PATTERN SETTINGS UPDATERS ---
+    def set_pattern_type(self, p_type):
+        self.pattern_type = p_type
+        self.save_settings()
+        self.pattern_changed.emit()
+        
+    def update_pattern_settings(self, p_type, key, value):
+        if p_type in self.pattern_settings:
+            self.pattern_settings[p_type][key] = value
+            self.save_settings()
+            self.pattern_changed.emit()
 
+    def get_shortcut(self, action_name): return self._shortcuts.get(action_name, "")
     def set_shortcut(self, action_name, key_sequence_str):
         self._shortcuts[action_name] = key_sequence_str
-        # Instantly save the file to the hard drive every time a key is changed!
         self.save_settings()
 
     @property
@@ -169,21 +178,15 @@ class StateManager(QObject):
 
     def set_selection_active(self, active: bool):
         if self.has_selection != active:
-            self.has_selection = active
-            self.selection_changed.emit(active)
+            self.has_selection = active; self.selection_changed.emit(active)
 
     def sync_tool_properties(self, color=None, thickness=None, style=None, fill_color=None, is_filled=None):
         s = self.tool_states["tool_cursor"]
-        if color: 
-            s["color"] = QColor(color); self.color_changed.emit(s["color"])
-        if thickness: 
-            s["thickness"] = thickness; self.brush_changed.emit(thickness, s.get("opacity", 255))
-        if style is not None: 
-            s["style"] = style; self.style_changed.emit("sync")
-        if fill_color:
-            self.current_fill_color = QColor(fill_color); self.fill_color_changed.emit(self.current_fill_color)
-        if is_filled is not None:
-            s["fill_enabled"] = is_filled; self.fill_toggled.emit(is_filled)
+        if color: s["color"] = QColor(color); self.color_changed.emit(s["color"])
+        if thickness: s["thickness"] = thickness; self.brush_changed.emit(thickness, s.get("opacity", 255))
+        if style is not None: s["style"] = style; self.style_changed.emit("sync")
+        if fill_color: self.current_fill_color = QColor(fill_color); self.fill_color_changed.emit(self.current_fill_color)
+        if is_filled is not None: s["fill_enabled"] = is_filled; self.fill_toggled.emit(is_filled)
 
     def is_key_active(self, key):
         if not key: return False
@@ -213,13 +216,10 @@ class StateManager(QObject):
             c = source_settings.get("color", QColor("black")); c.setAlpha(255)
             return t.name().upper() == c.name().upper()
 
-        # [FIX] Fill Color Active Check - Ignore Alpha
         if key.startswith("set_fill_"):
             map_key = key.replace("set_fill_", "set_")
             if map_key in self.color_map:
-                t = QColor(self.color_map[map_key])
-                c = self.current_fill_color
-                # Compare RGB only (HexRgb avoids the alpha component)
+                t = QColor(self.color_map[map_key]); c = self.current_fill_color
                 return t.name(QColor.HexRgb).upper() == c.name(QColor.HexRgb).upper()
 
         if key.startswith("set_font_"): return key.replace("set_font_", "").lower() == source_settings.get("font_style", "Normal").lower()
@@ -235,39 +235,29 @@ class StateManager(QObject):
         if action_key in self.shape_tools: self.last_active_shape = action_key
 
         if action_key.startswith("set_laser_time_"):
-            try:
-                val = int(action_key.split("_")[-1]); self.laser_duration = float(val) 
+            try: val = int(action_key.split("_")[-1]); self.laser_duration = float(val) 
             except ValueError: pass
             return
 
         if action_key == "toggle_tool_fill":
             new_state = not self.current_fill_enabled
-            if self.has_selection:
-                self.tool_states["tool_cursor"]["fill_enabled"] = new_state
-            else:
-                self.current_settings["fill_enabled"] = new_state
-            self.fill_toggled.emit(new_state)
-            return
+            if self.has_selection: self.tool_states["tool_cursor"]["fill_enabled"] = new_state
+            else: self.current_settings["fill_enabled"] = new_state
+            self.fill_toggled.emit(new_state); return
 
         if action_key.startswith("set_fill_opacity_"):
             try:
-                val = int(action_key.split("_")[-1])
-                alpha = int((val / 100.0) * 255)
-                new_col = QColor(self.current_fill_color)
-                new_col.setAlpha(alpha)
-                self.current_fill_color = new_col
-                self.fill_color_changed.emit(new_col)
+                val = int(action_key.split("_")[-1]); alpha = int((val / 100.0) * 255)
+                new_col = QColor(self.current_fill_color); new_col.setAlpha(alpha)
+                self.current_fill_color = new_col; self.fill_color_changed.emit(new_col)
             except ValueError: pass
             return
 
         if action_key.startswith("set_fill_"):
             map_key = action_key.replace("set_fill_", "set_")
             if map_key in self.color_map:
-                base_color = QColor(self.color_map[map_key])
-                current_alpha = self.current_fill_color.alpha()
-                base_color.setAlpha(current_alpha)
-                self.current_fill_color = base_color
-                self.fill_color_changed.emit(base_color)
+                base_color = QColor(self.color_map[map_key]); base_color.setAlpha(self.current_fill_color.alpha())
+                self.current_fill_color = base_color; self.fill_color_changed.emit(base_color)
             return
 
         if action_key == "toggle_board":
@@ -275,7 +265,7 @@ class StateManager(QObject):
                 self.last_board_color = QColor(self.board_color); self.board_color.setAlpha(0)
             else:
                 self.board_color = QColor(self.last_board_color)
-                if self.board_color.alpha() == 0: self.board_color = QColor("black") # Updated fallback
+                if self.board_color.alpha() == 0: self.board_color = QColor("black")
             self.background_changed.emit(self.board_color); return
 
         elif action_key == "set_board_transparent":
@@ -323,8 +313,7 @@ class StateManager(QObject):
                 val = int(action_key.split("_")[-1])
                 if self.has_selection:
                     self.tool_states["tool_cursor"]["thickness"] = val
-                    current_op = self.tool_states["tool_cursor"].get("opacity", 255)
-                    self.brush_changed.emit(val, current_op)
+                    self.brush_changed.emit(val, self.tool_states["tool_cursor"].get("opacity", 255))
                 elif "thickness" in self.current_settings:
                     self.current_settings["thickness"] = val
                     self.brush_changed.emit(val, self.current_opacity)
@@ -336,8 +325,7 @@ class StateManager(QObject):
                 if self.has_selection:
                     c = self.tool_states["tool_cursor"]["color"]; c.setAlpha(alpha)
                     self.tool_states["tool_cursor"]["color"] = c; self.tool_states["tool_cursor"]["opacity"] = alpha
-                    current_th = self.tool_states["tool_cursor"].get("thickness", 2)
-                    self.brush_changed.emit(current_th, alpha); self.color_changed.emit(c)
+                    self.brush_changed.emit(self.tool_states["tool_cursor"].get("thickness", 2), alpha); self.color_changed.emit(c)
                 elif "opacity" in self.current_settings:
                     self.current_settings["opacity"] = alpha
                     c = self.current_settings["color"]; c.setAlpha(alpha); self.current_settings["color"] = c
